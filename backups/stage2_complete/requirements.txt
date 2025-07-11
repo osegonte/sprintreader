@@ -1,0 +1,6 @@
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.23
+alembic==1.12.1
+PyQt6==6.6.1
+PyMuPDF==1.23.8
+python-dotenv==1.0.0

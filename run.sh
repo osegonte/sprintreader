@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# SprintReader - Development Runner
-# Starts the application in development mode
+# SprintReader - Main Application Launcher
+# Runs the complete PDF viewer with time tracking
 
 set -e
 
-echo "🏃 Starting SprintReader Development Environment"
-echo "=============================================="
+echo "📖 Starting SprintReader - PDF Reading & Time Tracking"
+echo "====================================================="
 
 # Check if we're in the right directory
 if [[ ! -f "requirements.txt" ]]; then
@@ -20,7 +20,6 @@ if [[ ! -d "venv" ]]; then
     exit 1
 fi
 
-echo "Activating virtual environment..."
 source venv/bin/activate
 
 # Check if .env file exists
@@ -29,11 +28,9 @@ if [[ ! -f ".env" ]]; then
     exit 1
 fi
 
-# Load environment variables
 source .env
 
-# Check database connection
-echo "🔍 Checking database connection..."
+# Quick database connection check
 python -c "
 import psycopg2
 import os
@@ -48,23 +45,34 @@ try:
         user=os.getenv('DB_USER'),
         password=os.getenv('DB_PASSWORD')
     )
-    print('✅ Database connection successful')
     conn.close()
 except Exception as e:
     print(f'❌ Database connection failed: {e}')
     exit(1)
 "
 
-# Create logs directory if it doesn't exist
+# Create logs directory
 mkdir -p logs
 
-# Start the application
-echo "🚀 Starting SprintReader..."
+# Launch SprintReader
+echo "🚀 Launching SprintReader..."
+echo ""
+echo "📖 Features available:"
+echo "  • PDF viewer with time tracking"
+echo "  • Automatic reading speed calculation"
+echo "  • Progress saving and resume reading"
+echo "  • Keyboard shortcuts (←/→, Ctrl++/-)"
+echo ""
+echo "🎮 Controls:"
+echo "  • Ctrl+O: Open PDF file"
+echo "  • ←/→: Navigate pages"
+echo "  • Ctrl++/Ctrl+-: Zoom in/out"
+echo "  • Ctrl+Q: Quit application"
+echo ""
 echo "Press Ctrl+C to stop the application"
 echo ""
 
-# For Stage 1, we'll just run a basic test
-python src/main.py
+cd src && python main.py
 
 echo ""
-echo "👋 SprintReader development session ended"
+echo "👋 SprintReader session ended"
