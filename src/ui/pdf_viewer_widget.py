@@ -1,15 +1,15 @@
 """
 SprintReader PDF Viewer Widget
-PyQt6 widget for displaying PDF content
+PyQt6 widget for displaying PDF content with time estimation
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QPushButton, QSpinBox, QSlider, QToolBar, QFileDialog,
-    QStatusBar, QSplitter, QTextEdit, QGroupBox, QProgressBar
+    QPushButton, QSpinBox, QFileDialog, QSplitter, QTextEdit, 
+    QGroupBox, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QPixmap, QAction, QIcon, QFont
+from PyQt6.QtGui import QPixmap, QFont
 import fitz  # PyMuPDF
 import os
 from typing import Optional
@@ -166,7 +166,7 @@ class PDFViewerWidget(QWidget):
         stats_layout = QVBoxLayout(stats_group)
         
         self.stats_display = QTextEdit()
-        self.stats_display.setMaximumHeight(120)
+        self.stats_display.setMaximumHeight(150)
         self.stats_display.setReadOnly(True)
         stats_layout.addWidget(self.stats_display)
         
@@ -363,7 +363,7 @@ Progress: {progress}%
         self._update_document_info()
     
     def _update_stats_display(self):
-        """Update reading statistics display"""
+        """Update reading statistics display with time estimation"""
         if not self.pdf_handler.current_doc:
             self.stats_display.setText("No active session")
             self.reading_time_label.setText("⏰ 0:00")
@@ -378,13 +378,37 @@ Progress: {progress}%
             minutes = int(duration_min % 60)
             time_str = f"{hours}:{minutes:02d}" if hours > 0 else f"{minutes}:00"
             
-            # Update displays
+            # Build stats text
             stats_text = f"""
 Session Time: {time_str}
 Pages Read: {stats.get('pages_read_this_session', 0)}
 Reading Speed: {stats.get('reading_speed', 0):.1f} pages/min
 Current Page Time: {stats.get('current_page_time', 0):.0f}s
             """.strip()
+            
+            # Add time estimation if document is loaded
+            if self.pdf_handler.document_id:
+                try:
+                    from estimation.time_estimator import TimeEstimator
+                    estimator = TimeEstimator()
+                    estimate = estimator.estimate_document_completion(self.pdf_handler.document_id)
+                    
+                    if estimate:
+                        remaining_time = estimate.get("estimated_time_remaining_formatted", "Unknown")
+                        confidence = estimate.get("confidence_level", "Unknown")
+                        
+                        estimation_text = f"""
+
+🎯 Smart Estimates:
+Time to finish: {remaining_time}
+Confidence: {confidence}
+                        """.strip()
+                        
+                        stats_text += estimation_text
+                    
+                    estimator.close()
+                except Exception as e:
+                    pass  # Estimation failed, continue without it
             
             self.stats_display.setText(stats_text)
             self.reading_time_label.setText(f"⏰ {time_str}")
