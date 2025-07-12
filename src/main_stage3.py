@@ -6,13 +6,12 @@ Enhanced with timer modes, focus features, and analytics
 import sys
 import os
 from PyQt6.QtWidgets import (
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QKeySequence, QFont    QApplication, QMainWindow, QVBoxLayout, QWidget, 
+    QApplication, QMainWindow, QVBoxLayout, QWidget, 
     QMenuBar, QStatusBar, QMessageBox, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QSpinBox
 )
-from PyQt6.QtWidgets import Qt, QTimer
-from PyQt6.QtWidgets import QAction, QKeySequence, QFont
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QAction, QKeySequence, QFont
 from dotenv import load_dotenv
 
 # Add the src directory to the path
@@ -30,6 +29,7 @@ from analytics.analytics_manager import AnalyticsManager
 from notifications.notification_manager import NotificationManager
 from estimation.time_estimator import TimeEstimator
 from estimation.reading_predictor import ReadingPredictor
+
 class SprintReaderMainWindow(QMainWindow):
     """Enhanced main application window with Stage 3 features"""
     
@@ -45,7 +45,8 @@ class SprintReaderMainWindow(QMainWindow):
         
         # Initialize time estimation
         self.time_estimator = TimeEstimator()
-        self.reading_predictor = ReadingPredictor()        
+        self.reading_predictor = ReadingPredictor()
+        
         # Timer state
         self.current_timer_mode = TimerMode.REGULAR
         self.timer_active = False
@@ -258,7 +259,8 @@ class SprintReaderMainWindow(QMainWindow):
         
         completion_forecast_action = QAction("&Completion Forecast", self)
         completion_forecast_action.triggered.connect(self.show_completion_forecast)
-        analytics_menu.addAction(completion_forecast_action)        
+        analytics_menu.addAction(completion_forecast_action)
+        
         # Help Menu
         help_menu = menubar.addMenu('&Help')
         
@@ -633,7 +635,8 @@ Timer Mode Breakdown:
         
         # Close time estimation managers
         self.time_estimator.close()
-        self.reading_predictor.close()        
+        self.reading_predictor.close()
+        
         # The PDF viewer will handle saving its own state
         print("👋 SprintReader (Stage 3) closing...")
         event.accept()
