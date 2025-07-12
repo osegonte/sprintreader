@@ -1,36 +1,17 @@
 #!/bin/bash
 
-# SprintReader - Main Application Launcher
-# Runs the complete PDF viewer with time tracking
+# SprintReader - Simple Launcher
+echo "🚀 Starting SprintReader..."
 
-set -e
-
-echo "📖 Starting SprintReader - PDF Reading & Time Tracking"
-echo "====================================================="
-
-# Check if we're in the right directory
-if [[ ! -f "requirements.txt" ]]; then
-    echo "❌ Please run this script from the sprintreader project directory"
-    exit 1
-fi
-
-# Activate virtual environment
+# Check environment
 if [[ ! -d "venv" ]]; then
-    echo "❌ Virtual environment not found. Please run ./setup.sh first"
+    echo "❌ Virtual environment not found. Run ./setup.sh first"
     exit 1
 fi
 
 source venv/bin/activate
 
-# Check if .env file exists
-if [[ ! -f ".env" ]]; then
-    echo "❌ Database not initialized. Please run ./init_database.sh first"
-    exit 1
-fi
-
-source .env
-
-# Quick database connection check
+# Check database connection
 python -c "
 import psycopg2
 import os
@@ -46,33 +27,16 @@ try:
         password=os.getenv('DB_PASSWORD')
     )
     conn.close()
+    print('✅ Database ready')
 except Exception as e:
-    print(f'❌ Database connection failed: {e}')
+    print(f'❌ Database error: {e}')
+    print('💡 Run ./setup.sh to set up database')
     exit(1)
 "
 
-# Create logs directory
-mkdir -p logs
+# Create vaults directory if it doesn't exist
+mkdir -p vaults
 
-# Launch SprintReader
-echo "🚀 Launching SprintReader..."
-echo ""
-echo "📖 Features available:"
-echo "  • PDF viewer with time tracking"
-echo "  • Automatic reading speed calculation"
-echo "  • Progress saving and resume reading"
-echo "  • Keyboard shortcuts (←/→, Ctrl++/-)"
-echo ""
-echo "🎮 Controls:"
-echo "  • Ctrl+O: Open PDF file"
-echo "  • ←/→: Navigate pages"
-echo "  • Ctrl++/Ctrl+-: Zoom in/out"
-echo "  • Ctrl+Q: Quit application"
-echo ""
-echo "Press Ctrl+C to stop the application"
-echo ""
-
+# Launch application using the correct filename
+echo "📝 Launching SprintReader..."
 cd src && python main.py
-
-echo ""
-echo "👋 SprintReader session ended"

@@ -2,7 +2,7 @@
 //
 // This file is part of the QtGui Python extension module.
 //
-// Copyright (c) 2023 Riverbank Computing Limited <info@riverbankcomputing.com>
+// Copyright (c) 2024 Riverbank Computing Limited <info@riverbankcomputing.com>
 // 
 // This file is part of PyQt6.
 // 
@@ -26,11 +26,16 @@ namespace Qt
 #include <qtextdocument.h>
 %End
 
+%If (Qt_6_7_0 -)
+    bool mightBeRichText(QAnyStringView);
+%End
+%If (- Qt_6_7_0)
     bool mightBeRichText(const QString &);
+%End
     QString convertFromPlainText(const QString &plain, Qt::WhiteSpaceMode mode = Qt::WhiteSpacePre);
 };
 
-class QTextDocument : QObject
+class QTextDocument : public QObject
 {
 %TypeHeaderCode
 #include <qtextdocument.h>

@@ -2,7 +2,7 @@
 //
 // This file is part of the QtXml Python extension module.
 //
-// Copyright (c) 2023 Riverbank Computing Limited <info@riverbankcomputing.com>
+// Copyright (c) 2024 Riverbank Computing Limited <info@riverbankcomputing.com>
 // 
 // This file is part of PyQt6.
 // 
@@ -168,7 +168,7 @@ public:
     bool isEmpty() const;
 };
 
-class QDomDocumentType : QDomNode
+class QDomDocumentType : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -186,7 +186,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomDocument : QDomNode
+class QDomDocument : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -321,7 +321,7 @@ public:
     bool contains(const QString &name) const;
 };
 
-class QDomDocumentFragment : QDomNode
+class QDomDocumentFragment : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -333,7 +333,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomCharacterData : QDomNode
+class QDomCharacterData : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -353,7 +353,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomAttr : QDomNode
+class QDomAttr : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -370,7 +370,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomElement : QDomNode
+class QDomElement : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -432,7 +432,7 @@ public:
     QString text() const;
 };
 
-class QDomText : QDomCharacterData
+class QDomText : public QDomCharacterData
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -445,7 +445,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomComment : QDomCharacterData
+class QDomComment : public QDomCharacterData
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -457,7 +457,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomCDATASection : QDomText
+class QDomCDATASection : public QDomText
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -469,7 +469,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomNotation : QDomNode
+class QDomNotation : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -483,7 +483,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomEntity : QDomNode
+class QDomEntity : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -498,7 +498,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomEntityReference : QDomNode
+class QDomEntityReference : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>
@@ -510,7 +510,7 @@ public:
     QDomNode::NodeType nodeType() const;
 };
 
-class QDomProcessingInstruction : QDomNode
+class QDomProcessingInstruction : public QDomNode
 {
 %TypeHeaderCode
 #include <qdom.h>

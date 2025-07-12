@@ -6,7 +6,6 @@ typeinfo plugins.qmltypes
 depends QtQuick.Controls auto
 depends QtQuick.Layouts auto
 depends QtQuick auto
-depends QtQuick
 prefer :/qt-project.org/imports/QtQuick/NativeStyle/
 DefaultButton 6.0 controls/DefaultButton.qml
 DefaultButton 2.0 controls/DefaultButton.qml

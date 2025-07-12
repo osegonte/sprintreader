@@ -1,0 +1,32 @@
+# SprintReader Stage 4 Requirements
+# PDF Reading, Time Tracking, Focus Features, and Note-Taking
+
+# Core Dependencies
+PyQt6==6.7.0
+PyQt6-Qt6==6.7.0
+
+# PDF Processing (PyMuPDF includes fitz)
+PyMuPDF==1.24.1
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.25
+
+# Environment & Configuration
+python-dotenv==1.0.0
+
+# Date/Time Processing
+python-dateutil==2.8.2
+
+# Stage 4: Note-Taking Dependencies
+markdown==3.5.2
+python-frontmatter==1.1.0
+PyYAML==6.0.1
+
+# Optional: Advanced Export Features
+# pypandoc==1.13  # Uncomment for advanced document export
+
+# Development & Debugging (optional)
+# pytest==7.4.3
+# black==23.12.1
+# flake8==6.1.0

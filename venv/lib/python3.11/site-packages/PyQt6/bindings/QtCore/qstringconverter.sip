@@ -2,7 +2,7 @@
 //
 // This file is part of the QtCore Python extension module.
 //
-// Copyright (c) 2023 Riverbank Computing Limited <info@riverbankcomputing.com>
+// Copyright (c) 2024 Riverbank Computing Limited <info@riverbankcomputing.com>
 // 
 // This file is part of PyQt6.
 // 
@@ -44,7 +44,7 @@ public:
 %End
 %If (- Qt_6_4_0)
 
-class QStringConverter : QStringConverterBase
+class QStringConverter : public QStringConverterBase
 {
 %TypeHeaderCode
 #include <qstringconverter.h>
@@ -81,7 +81,7 @@ private:
 
 %End
 
-class QStringEncoder : QStringConverter
+class QStringEncoder : public QStringConverter
 {
 %TypeHeaderCode
 #include <qstringconverter.h>
@@ -95,7 +95,7 @@ public:
     QByteArray encode(QStringView in) [QStringEncoder::DecodedData<QStringView> (QStringView in)];
 };
 
-class QStringDecoder : QStringConverter
+class QStringDecoder : public QStringConverter
 {
 %TypeHeaderCode
 #include <qstringconverter.h>
