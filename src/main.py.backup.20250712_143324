@@ -416,24 +416,19 @@ class SprintReaderMainWindow(QMainWindow):
             print(f"❌ Error stopping timer: {e}")
     
     def update_timer_display(self):
-        """Update timer display every second - ENHANCED"""
+        """Update timer display every second - COMPLETELY FIXED"""
         try:
             # Check if timer manager has any active timer
-            if self.timer_manager.is_running() or self.timer_manager.get_state().name in ["BREAK", "PAUSED"]:
+            if self.timer_manager.is_running() or self.timer_manager.get_state().name == "BREAK":
                 time_str = self.timer_manager.get_formatted_time()
                 self.timer_display.setText(time_str)
-                
-                # Add visual feedback every 10 seconds
-                remaining = self.timer_manager.get_remaining_time()
-                if remaining % 10 == 0 and remaining > 0:
-                    print(f"🕐 Timer: {time_str}")
                 
                 # Update session info based on state
                 state = self.timer_manager.get_state()
                 if state.name == "RUNNING":
                     mode = self.timer_manager.get_current_mode().value.title()
                     self.session_info_label.setText(f"🎯 {mode} Session Active")
-                    # Green background for active timer
+                    # Update timer display style for active session
                     self.timer_display.setStyleSheet("""
                         QLabel {
                             background-color: #e8f5e8;
@@ -442,13 +437,12 @@ class SprintReaderMainWindow(QMainWindow):
                             padding: 8px 16px;
                             min-width: 80px;
                             color: #2e7d32;
-                            font-weight: bold;
                         }
                     """)
                 elif state.name == "BREAK":
                     self.session_info_label.setText("☕ Break Time")
                     self.is_break_mode = True
-                    # Orange background for break
+                    # Update timer display style for break
                     self.timer_display.setStyleSheet("""
                         QLabel {
                             background-color: #fff3e0;
@@ -457,32 +451,41 @@ class SprintReaderMainWindow(QMainWindow):
                             padding: 8px 16px;
                             min-width: 80px;
                             color: #ef6c00;
-                            font-weight: bold;
                         }
                     """)
                 elif state.name == "PAUSED":
                     self.session_info_label.setText("⏸️ Session Paused")
+                    # Update timer display style for paused
+                    self.timer_display.setStyleSheet("""
+                        QLabel {
+                            background-color: #fafafa;
+                            border: 2px solid #757575;
+                            border-radius: 8px;
+                            padding: 8px 16px;
+                            min-width: 80px;
+                            color: #424242;
+                        }
+                    """)
+            elif self.timer_active and not self.timer_manager.is_running():
+                # Timer is active but not running (finished)
+                self.timer_display.setText("00:00")
+                self.session_info_label.setText("✅ Session Complete!")
             else:
                 # No active timer
-                self.timer_display.setText("00:00")
-                self.session_info_label.setText("📚 Ready to Focus & Take Notes")
-                # Reset to default style
-                self.timer_display.setStyleSheet("""
-                    QLabel {
-                        background-color: #f0f0f0;
-                        border: 2px solid #ccc;
-                        border-radius: 8px;
-                        padding: 8px 16px;
-                        min-width: 80px;
-                        font-weight: bold;
-                    }
-                """)
-                
+                if not self.timer_active:
+                    self.timer_display.setText("00:00")
+                    self.session_info_label.setText("📚 Ready to Focus & Take Notes")
+                    
         except Exception as e:
             # Only log errors occasionally to avoid spam
-            if not hasattr(self, '_last_timer_error'):
-                print(f"⚠️ Timer error: {e}")
+            if hasattr(self, '_last_timer_error'):
+                if self._last_timer_error != str(e):
+                    print(f"⚠️ Timer display error: {e}")
+                    self._last_timer_error = str(e)
+            else:
+                print(f"⚠️ Timer display error: {e}")
                 self._last_timer_error = str(e)
+    
     def _update_timer_controls(self, timer_running: bool):
         """Update timer control button states"""
         self.start_timer_btn.setEnabled(not timer_running)

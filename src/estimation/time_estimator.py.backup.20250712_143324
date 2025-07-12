@@ -17,42 +17,34 @@ class TimeEstimator:
         self.default_time_per_page = 120  # 2 minutes default if no data
     
     def estimate_document_completion(self, document_id: int) -> Dict:
-        """Estimate completion time using actual reading data"""
+        """Estimate time to complete a specific document"""
         try:
             document = self.session.query(Document).filter_by(id=document_id).first()
             if not document:
                 return {}
             
-            print(f"📊 Estimating completion for: {document.title or document.filename}")
+            # Get user's reading speed for this document
+            avg_time_per_page = self._get_document_reading_speed(document_id)
             
-            # Get actual reading speed for this specific document
-            seconds_per_page = self._get_document_reading_speed(document_id)
-            
-            # Calculate progress and remaining work
+            # Calculate remaining pages
             current_page = document.current_page or 1
             total_pages = document.total_pages or 0
             remaining_pages = max(0, total_pages - current_page)
-            progress_percent = (current_page / total_pages * 100) if total_pages > 0 else 0
             
-            # Calculate time estimates
-            estimated_seconds = remaining_pages * seconds_per_page
+            # Calculate estimates
+            estimated_seconds = remaining_pages * avg_time_per_page
             estimated_minutes = estimated_seconds / 60
             
-            print(f"📊 Progress: {current_page}/{total_pages} ({progress_percent:.1f}%)")
-            print(f"📊 Speed: {seconds_per_page:.1f}s/page")
-            print(f"📊 Remaining: {remaining_pages} pages = {estimated_minutes:.1f} minutes")
+            # Calculate progress percentage
+            progress_percent = (current_page / total_pages * 100) if total_pages > 0 else 0
             
-            # Estimate completion date based on reading habits
-            daily_reading_time = self._get_realistic_daily_reading_time()
-            days_to_complete = estimated_minutes / daily_reading_time if daily_reading_time > 0 else None
+            # Get completion date estimate based on daily reading habits
+            daily_avg_minutes = self._get_daily_reading_average()
+            days_to_complete = estimated_minutes / daily_avg_minutes if daily_avg_minutes > 0 else None
             
-            completion_date = None
-            if days_to_complete and days_to_complete > 0:
-                from datetime import datetime, timedelta
-                completion_date = datetime.now() + timedelta(days=days_to_complete)
-            
-            # Confidence based on amount of data
-            confidence = self._calculate_confidence_level(document_id)
+            estimated_completion_date = None
+            if days_to_complete:
+                estimated_completion_date = datetime.now() + timedelta(days=days_to_complete)
             
             return {
                 'document_id': document_id,
@@ -61,17 +53,18 @@ class TimeEstimator:
                 'current_page': current_page,
                 'remaining_pages': remaining_pages,
                 'progress_percent': round(progress_percent, 1),
-                'avg_time_per_page_seconds': round(seconds_per_page, 1),
+                'avg_time_per_page_seconds': round(avg_time_per_page, 1),
                 'estimated_time_remaining_minutes': round(estimated_minutes, 1),
                 'estimated_time_remaining_formatted': self._format_time_estimate(estimated_minutes),
-                'estimated_completion_date': completion_date.isoformat() if completion_date else None,
-                'confidence_level': confidence,
-                'recommendation': self._get_reading_recommendation(estimated_minutes, remaining_pages)
+                'estimated_completion_date': estimated_completion_date.isoformat() if estimated_completion_date else None,
+                'confidence_level': self._calculate_confidence_level(document_id),
+                'recommendation': self._get_reading_recommendation(estimated_minutes, days_to_complete)
             }
             
         except Exception as e:
             print(f"❌ Error estimating document completion: {e}")
             return {}
+    
     def estimate_all_documents_completion(self) -> Dict:
         """Estimate total time to complete all documents"""
         try:
@@ -162,128 +155,80 @@ class TimeEstimator:
             return {}
     
     def _get_document_reading_speed(self, document_id: int) -> float:
-        """Calculate actual time per page from reading sessions"""
+        """Get average time per page for a specific document"""
         try:
-            # Get all reading sessions for this document
+            # Get recent sessions for this document
             sessions = self.session.query(ReadingSession).filter_by(
                 document_id=document_id
-            ).all()
+            ).order_by(ReadingSession.start_time.desc()).limit(10).all()
             
-            if not sessions:
-                print(f"📊 No reading data for document {document_id}, using overall speed")
-                return self._get_user_overall_reading_speed()
-            
-            total_time_seconds = 0
-            total_pages_read = 0
-            valid_sessions = []
-            
-            # Process each session to extract time-per-page data
-            for session in sessions:
-                if session.duration and session.pages_read and session.pages_read > 0:
-                    session_seconds = session.duration * 60  # Convert minutes to seconds
-                    total_time_seconds += session_seconds
-                    total_pages_read += session.pages_read
-                    
-                    time_per_page = session_seconds / session.pages_read
-                    valid_sessions.append({
-                        'pages': session.pages_read,
-                        'time': session.duration,
-                        'speed': time_per_page
-                    })
-            
-            if total_pages_read >= 1:  # Need at least 1 page of data
-                avg_seconds_per_page = total_time_seconds / total_pages_read
-                
-                # Debug output
-                print(f"📊 Document {document_id} reading analysis:")
-                for sess in valid_sessions[-3:]:  # Show last 3 sessions
-                    print(f"   {sess['pages']} pages in {sess['time']:.1f}min = {sess['speed']:.1f}s/page")
-                print(f"📊 Average speed: {avg_seconds_per_page:.1f} seconds per page")
-                
-                # Sanity check: reasonable bounds
-                if avg_seconds_per_page < 0.5:
-                    print("📊 Speed unusually fast, using 1s/page minimum")
-                    return 1.0
-                elif avg_seconds_per_page > 600:  # 10 minutes per page max
-                    print("📊 Speed unusually slow, using 60s/page maximum")
-                    return 60.0
-                else:
-                    return avg_seconds_per_page
-            else:
-                print(f"📊 No valid reading data, using fallback speed")
-                return self._get_user_overall_reading_speed()
-                
-        except Exception as e:
-            print(f"❌ Error calculating reading speed: {e}")
-            return 30.0  # Reasonable default
-    def _get_user_overall_reading_speed(self) -> float:
-        """Calculate overall reading speed across all documents"""
-        try:
-            # Get recent reading sessions from all documents
-            recent_sessions = self.session.query(ReadingSession).filter(
-                ReadingSession.duration.isnot(None),
-                ReadingSession.pages_read.isnot(None),
-                ReadingSession.pages_read > 0
-            ).order_by(ReadingSession.start_time.desc()).limit(30).all()
-            
-            if not recent_sessions:
-                print("📊 No reading history found, using 15s/page default")
-                return 15.0
-            
-            total_seconds = 0
+            total_time = 0
             total_pages = 0
             
-            for session in recent_sessions:
-                total_seconds += session.duration * 60
+            for session in sessions:
+                if session.duration and session.pages_read and session.pages_read > 0:
+                    total_time += session.duration * 60  # Convert to seconds
+                    total_pages += session.pages_read
+            
+            if total_pages >= self.minimum_sample_pages:
+                return total_time / total_pages
+            else:
+                # Fall back to user's overall reading speed
+                return self._get_user_overall_reading_speed()
+                
+        except Exception as e:
+            print(f"❌ Error getting document reading speed: {e}")
+            return self.default_time_per_page
+    
+    def _get_user_overall_reading_speed(self) -> float:
+        """Get user's overall reading speed across all documents"""
+        try:
+            # Get recent sessions across all documents
+            sessions = self.session.query(ReadingSession).filter(
+                and_(
+                    ReadingSession.duration.isnot(None),
+                    ReadingSession.pages_read.isnot(None),
+                    ReadingSession.pages_read > 0
+                )
+            ).order_by(ReadingSession.start_time.desc()).limit(50).all()
+            
+            total_time = 0
+            total_pages = 0
+            
+            for session in sessions:
+                total_time += session.duration * 60  # Convert to seconds
                 total_pages += session.pages_read
             
-            if total_pages > 0:
-                overall_speed = total_seconds / total_pages
-                print(f"📊 Overall reading speed: {overall_speed:.1f}s/page (from {len(recent_sessions)} sessions)")
-                
-                # Apply reasonable bounds
-                return max(1.0, min(overall_speed, 120.0))
+            if total_pages >= self.minimum_sample_pages:
+                return total_time / total_pages
             else:
-                return 15.0
+                return self.default_time_per_page
                 
         except Exception as e:
-            print(f"❌ Error calculating overall speed: {e}")
-            return 15.0
-    def _get_realistic_daily_reading_time(self) -> float:
-        """Calculate realistic daily reading time based on actual usage"""
+            print(f"❌ Error getting overall reading speed: {e}")
+            return self.default_time_per_page
+    
+    def _get_daily_reading_average(self) -> float:
+        """Get user's average daily reading time in minutes"""
         try:
-            from datetime import datetime, timedelta
-            from sqlalchemy import func, and_
+            # Get sessions from last 30 days
+            thirty_days_ago = datetime.now() - timedelta(days=30)
             
-            # Look at last 2 weeks of actual reading
-            two_weeks_ago = datetime.now() - timedelta(days=14)
-            
-            # Get daily reading totals
-            daily_totals = self.session.query(
-                func.date(ReadingSession.start_time).label('date'),
-                func.sum(ReadingSession.duration).label('daily_minutes')
+            result = self.session.query(
+                func.avg(ReadingSession.duration)
             ).filter(
                 and_(
-                    ReadingSession.start_time >= two_weeks_ago,
+                    ReadingSession.start_time >= thirty_days_ago,
                     ReadingSession.duration.isnot(None)
                 )
-            ).group_by(func.date(ReadingSession.start_time)).all()
+            ).scalar()
             
-            if daily_totals:
-                # Calculate average from days when you actually read
-                total_minutes = sum(day.daily_minutes or 0 for day in daily_totals)
-                reading_days = len(daily_totals)
-                avg_daily_minutes = total_minutes / reading_days
-                
-                print(f"📊 Daily reading pattern: {avg_daily_minutes:.1f} min/day ({reading_days} active days)")
-                return max(avg_daily_minutes, 10.0)  # Minimum 10 minutes per day
-            else:
-                print("📊 No recent reading pattern, using 30 min/day estimate")
-                return 30.0
-                
+            return float(result) if result else 30.0  # Default 30 minutes
+            
         except Exception as e:
-            print(f"❌ Error calculating daily reading time: {e}")
+            print(f"❌ Error getting daily average: {e}")
             return 30.0
+    
     def _calculate_confidence_level(self, document_id: int) -> str:
         """Calculate confidence level of the estimate"""
         try:

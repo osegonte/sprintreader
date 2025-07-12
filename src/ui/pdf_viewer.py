@@ -1,6 +1,6 @@
 """
-SprintReader Stage 4 PDF Viewer Widget
-Enhanced with note-taking and highlighting capabilities
+SprintReader Stage 4 PDF Viewer Widget - SYNTAX FIXED
+Enhanced with note-taking, highlighting, and WORKING time estimation
 """
 
 from PyQt6.QtWidgets import (
@@ -13,12 +13,13 @@ from PyQt6.QtGui import QPixmap, QFont
 import fitz  # PyMuPDF
 import os
 from typing import Optional, List
+from datetime import datetime
 from pdf_handler.pdf_handler import PDFHandler
 from notes.note_manager import NoteManager
 from notes.highlight_selector import HighlightableLabel, HighlightDialog, NotesPanel
 
 class PDFViewerWidget(QWidget):
-    """Enhanced PDF viewer widget with note-taking capabilities"""
+    """Enhanced PDF viewer widget with note-taking and WORKING time estimation"""
     
     # Signals
     page_changed = pyqtSignal(int)
@@ -39,6 +40,12 @@ class PDFViewerWidget(QWidget):
         self.current_document_notes = []
         self.current_page_highlights = []
         
+        # Time estimation tracking - ENHANCED
+        self.time_estimator = None
+        self.reading_predictor = None
+        self.last_estimation_update = None
+        self.current_estimation = {}
+        
         # Timers
         self.autosave_timer = QTimer()
         self.autosave_timer.timeout.connect(self._autosave_progress)
@@ -47,6 +54,11 @@ class PDFViewerWidget(QWidget):
         self.stats_timer = QTimer()
         self.stats_timer.timeout.connect(self._update_stats_display)
         self.stats_timer.start(1000)  # Update every second
+        
+        # Time estimation update timer - NEW
+        self.estimation_timer = QTimer()
+        self.estimation_timer.timeout.connect(self._update_time_estimation)
+        self.estimation_timer.start(10000)  # Update estimates every 10 seconds
         
         self.init_ui()
         self.connect_signals()
@@ -189,6 +201,26 @@ class PDFViewerWidget(QWidget):
         progress_layout.addWidget(self.progress_details)
         
         doc_layout.addWidget(progress_group)
+        
+        # Time Estimation Group - ENHANCED
+        estimation_group = QGroupBox("⏱️ Smart Time Estimation")
+        estimation_layout = QVBoxLayout(estimation_group)
+        
+        self.estimation_display = QTextEdit()
+        self.estimation_display.setMaximumHeight(120)
+        self.estimation_display.setReadOnly(True)
+        self.estimation_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #f0f8ff;
+                border: 1px solid #4169e1;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 11px;
+            }
+        """)
+        estimation_layout.addWidget(self.estimation_display)
+        
+        doc_layout.addWidget(estimation_group)
         doc_layout.addStretch()
         
         sidebar_tabs.addTab(doc_tab, "📄 Document")
@@ -283,6 +315,13 @@ class PDFViewerWidget(QWidget):
         
         status_layout.addStretch()
         
+        # Time estimation status - NEW
+        self.estimation_status_label = QLabel("⏱️ No estimation")
+        self.estimation_status_label.setStyleSheet("color: #4169e1; font-weight: bold;")
+        status_layout.addWidget(self.estimation_status_label)
+        
+        status_layout.addWidget(QLabel(" | "))
+        
         # Note mode indicator
         self.note_mode_label = QLabel("📝 Notes: Ready")
         status_layout.addWidget(self.note_mode_label)
@@ -321,6 +360,9 @@ class PDFViewerWidget(QWidget):
     def load_pdf(self, file_path: str):
         """Load a PDF file and initialize note-taking"""
         if self.pdf_handler.open_pdf(file_path):
+            # Initialize time estimation - ENHANCED
+            self._initialize_time_estimation()
+            
             # Update UI
             self._update_document_info()
             self._update_navigation_state()
@@ -328,6 +370,9 @@ class PDFViewerWidget(QWidget):
             
             # Load notes for this document
             self._load_document_notes()
+            
+            # Initial time estimation
+            self._update_time_estimation()
             
             # Emit signal
             self.document_opened.emit(file_path)
@@ -337,8 +382,89 @@ class PDFViewerWidget(QWidget):
             self.status_label.setText(f"Loaded: {filename}")
             self.session_label.setText(f"📚 {filename}")
             self.note_mode_label.setText("📝 Notes: Active")
+            
+            print(f"✅ PDF loaded with time estimation: {filename}")
         else:
             self.status_label.setText("❌ Failed to load PDF")
+    
+    def _initialize_time_estimation(self):
+        """Initialize time estimation system - NEW"""
+        try:
+            from estimation.time_estimator import TimeEstimator
+            from estimation.reading_predictor import ReadingPredictor
+            
+            self.time_estimator = TimeEstimator()
+            self.reading_predictor = ReadingPredictor()
+            
+            print("✅ Time estimation system initialized")
+        except Exception as e:
+            print(f"❌ Error initializing time estimation: {e}")
+            self.time_estimator = None
+            self.reading_predictor = None
+    
+    def _update_time_estimation(self):
+        """Update time estimation display - NEW"""
+        if not self.pdf_handler.document_id or not self.time_estimator:
+            self.estimation_display.setText("No document loaded or estimation unavailable")
+            self.estimation_status_label.setText("⏱️ No estimation")
+            return
+        
+        try:
+            # Get document completion estimate
+            estimate = self.time_estimator.estimate_document_completion(
+                self.pdf_handler.document_id
+            )
+            
+            if estimate:
+                self.current_estimation = estimate
+                
+                # Format estimation display
+                estimation_text = f"""
+📖 Document: {estimate.get('document_title', 'Unknown')[:30]}...
+
+📊 Progress:
+• Current: Page {estimate.get('current_page', 0)} / {estimate.get('total_pages', 0)}
+• Complete: {estimate.get('progress_percent', 0):.1f}%
+• Remaining: {estimate.get('remaining_pages', 0)} pages
+
+⏱️ Time Estimates:
+• Per page: {estimate.get('avg_time_per_page_seconds', 0):.1f}s
+• To finish: {estimate.get('estimated_time_remaining_formatted', 'Unknown')}
+• Confidence: {estimate.get('confidence_level', 'Unknown')}
+
+📅 Completion:
+• At current pace: {self._format_completion_date(estimate.get('estimated_completion_date'))}
+
+💡 Tip: {estimate.get('recommendation', 'Keep reading!')}
+                """.strip()
+                
+                self.estimation_display.setText(estimation_text)
+                
+                # Update status bar
+                remaining_time = estimate.get('estimated_time_remaining_formatted', 'Unknown')
+                confidence = estimate.get('confidence_level', 'Unknown')
+                self.estimation_status_label.setText(f"⏱️ {remaining_time} left ({confidence} confidence)")
+                
+                self.last_estimation_update = datetime.now()
+                print(f"📊 Time estimation updated: {remaining_time} remaining")
+            else:
+                self.estimation_display.setText("⏱️ Building estimate...\nRead a few more pages for accurate predictions.")
+                self.estimation_status_label.setText("⏱️ Building estimate...")
+                
+        except Exception as e:
+            print(f"❌ Error updating time estimation: {e}")
+            self.estimation_display.setText("⚠️ Estimation temporarily unavailable")
+            self.estimation_status_label.setText("⏱️ Estimation error")
+    
+    def _format_completion_date(self, date_str: str) -> str:
+        """Format completion date for display"""
+        if not date_str:
+            return "Unknown"
+        try:
+            # Extract just the date part
+            return date_str[:10]  # YYYY-MM-DD format
+        except:
+            return "Unknown"
     
     def previous_page(self):
         """Go to previous page"""
@@ -346,6 +472,7 @@ class PDFViewerWidget(QWidget):
             self._render_current_page()
             self._update_ui_state()
             self._load_page_highlights()
+            self._trigger_estimation_update()
     
     def next_page(self):
         """Go to next page"""
@@ -353,6 +480,7 @@ class PDFViewerWidget(QWidget):
             self._render_current_page()
             self._update_ui_state()
             self._load_page_highlights()
+            self._trigger_estimation_update()
     
     def go_to_page(self, page_num: int):
         """Go to specific page (1-based)"""
@@ -360,6 +488,13 @@ class PDFViewerWidget(QWidget):
             self._render_current_page()
             self._update_ui_state()
             self._load_page_highlights()
+            self._trigger_estimation_update()
+    
+    def _trigger_estimation_update(self):
+        """Trigger immediate estimation update after page change"""
+        if self.time_estimator and self.pdf_handler.document_id:
+            # Use QTimer.singleShot to update estimation after a short delay
+            QTimer.singleShot(1000, self._update_time_estimation)
     
     def zoom_in(self):
         """Increase zoom level"""
@@ -667,7 +802,7 @@ Progress: {progress}%
         self._update_document_info()
     
     def _update_stats_display(self):
-        """Update reading statistics display"""
+        """Update reading statistics display - ENHANCED WITH ESTIMATION"""
         if not self.pdf_handler.current_doc:
             self.stats_display.setText("No active session")
             self.reading_time_label.setText("⏰ 0:00")
@@ -684,35 +819,31 @@ Progress: {progress}%
             
             # Build stats text
             stats_text = f"""
-Session Time: {time_str}
+📊 Current Session:
+Time: {time_str}
 Pages Read: {stats.get('pages_read_this_session', 0)}
 Reading Speed: {stats.get('reading_speed', 0):.1f} pages/min
 Current Page Time: {stats.get('current_page_time', 0):.0f}s
             """.strip()
             
-            # Add time estimation
-            if self.pdf_handler.document_id:
-                try:
-                    from estimation.time_estimator import TimeEstimator
-                    estimator = TimeEstimator()
-                    estimate = estimator.estimate_document_completion(self.pdf_handler.document_id)
-                    
-                    if estimate:
-                        remaining_time = estimate.get("estimated_time_remaining_formatted", "Unknown")
-                        confidence = estimate.get("confidence_level", "Unknown")
-                        
-                        estimation_text = f"""
+            # Add time estimation if available - ENHANCED
+            if self.current_estimation:
+                remaining_time = self.current_estimation.get("estimated_time_remaining_formatted", "Unknown")
+                confidence = self.current_estimation.get("confidence_level", "Unknown")
+                remaining_pages = self.current_estimation.get("remaining_pages", 0)
+                
+                estimation_text = f"""
 
 🎯 Smart Estimates:
+Remaining: {remaining_pages} pages
 Time to finish: {remaining_time}
 Confidence: {confidence}
-                        """.strip()
-                        
-                        stats_text += estimation_text
-                    
-                    estimator.close()
-                except Exception:
-                    pass  # Estimation failed, continue without it
+Avg time/page: {self.current_estimation.get('avg_time_per_page_seconds', 0):.1f}s
+                """.strip()
+                
+                stats_text += estimation_text
+            else:
+                stats_text += "\n\n⏱️ Building time estimates..."
             
             self.stats_display.setText(stats_text)
             self.reading_time_label.setText(f"⏰ {time_str}")
@@ -743,6 +874,9 @@ Highlights: {len(highlights)}
         """Auto-save reading progress"""
         if self.pdf_handler.current_doc:
             self.pdf_handler._save_progress()
+            # Trigger estimation update after saving progress
+            if self.time_estimator:
+                QTimer.singleShot(500, self._update_time_estimation)
     
     def export_notes(self, export_path: str = None):
         """Export notes for current document"""
@@ -766,6 +900,14 @@ Highlights: {len(highlights)}
                     doc_info = self.pdf_handler.get_document_info()
                     f.write(f"# Notes for {doc_info.get('title', 'Document')}\n\n")
                     f.write(f"*Exported on {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n\n")
+                    
+                    # Add time estimation summary
+                    if self.current_estimation:
+                        f.write("## Reading Progress & Time Estimation\n\n")
+                        f.write(f"- **Current Page**: {self.current_estimation.get('current_page', 0)} / {self.current_estimation.get('total_pages', 0)}\n")
+                        f.write(f"- **Progress**: {self.current_estimation.get('progress_percent', 0):.1f}%\n")
+                        f.write(f"- **Estimated time to finish**: {self.current_estimation.get('estimated_time_remaining_formatted', 'Unknown')}\n")
+                        f.write(f"- **Reading speed**: {self.current_estimation.get('avg_time_per_page_seconds', 0):.1f} seconds per page\n\n")
                     
                     # Group notes by topic
                     from collections import defaultdict
@@ -793,8 +935,26 @@ Highlights: {len(highlights)}
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export notes:\n{str(e)}")
     
+    def get_time_estimation_summary(self) -> dict:
+        """Get current time estimation summary for external use"""
+        return self.current_estimation.copy() if self.current_estimation else {}
+    
     def closeEvent(self, event):
         """Handle widget close event"""
+        # Close time estimation resources
+        if self.time_estimator:
+            try:
+                self.time_estimator.close()
+            except:
+                pass
+        
+        if self.reading_predictor:
+            try:
+                self.reading_predictor.close()
+            except:
+                pass
+        
         if self.pdf_handler.current_doc:
             self.pdf_handler.close_pdf()
+        
         super().closeEvent(event)
