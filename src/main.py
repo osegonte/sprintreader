@@ -1,17 +1,20 @@
 """
-SprintReader - Main Application (FIXED Timer Integration)
-PDF Reading & Note-Taking Tool with WORKING Timer and Focus Features
+SprintReader Stage 5 Integration
+Main file integrating Topic Management, Goal Setting, and Enhanced Focus Mode
 """
 
 import sys
 import os
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QWidget, 
-    QMenuBar, QStatusBar, QMessageBox, QHBoxLayout,
-    QPushButton, QLabel, QComboBox, QSpinBox, QFileDialog
+    QApplication, QMainWindow, QVBoxLayout, QWidget, QHBoxLayout,
+    QPushButton, QLabel, QComboBox, QSpinBox, QTabWidget, QSplitter,
+    QGroupBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem,
+    QDialog, QDialogButtonBox, QLineEdit, QDateEdit, QMessageBox,
+    QScrollArea, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QKeySequence, QFont
+from PyQt6.QtCore import Qt, QTimer, QDate, pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence, QFont, QColor
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Add the src directory to the path
@@ -20,180 +23,842 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Load environment variables
 load_dotenv()
 
-# Import our modules
+# Import Stage 5 components
 from database.models import db_manager
+from database.stage5_models import Stage5Manager, Topic, Goal, GoalType, FocusLevel
+from stage5.topic_manager import TopicManager, TopicSummary
+from stage5.goal_manager import GoalManager, GoalSummary, GoalType, GoalStatus
+from stage5.enhanced_focus_manager import EnhancedFocusManager, FocusLevel
+
+# Import existing components
 from ui.pdf_viewer import PDFViewerWidget
 from timer.timer_manager import TimerManager, TimerMode
-from focus.focus_manager import FocusManager
 from analytics.analytics_manager import AnalyticsManager
 from notifications.notification_manager import NotificationManager
-from estimation.time_estimator import TimeEstimator
-from estimation.reading_predictor import ReadingPredictor
-from notes.note_manager import NoteManager
 
-class SprintReaderMainWindow(QMainWindow):
-    """Main application window with WORKING timer and note-taking features"""
+class TopicOverviewWidget(QWidget):
+    """Widget showing topic overview with progress and goals"""
+    
+    topic_selected = pyqtSignal(int)  # topic_id
+    focus_topic_requested = pyqtSignal(int)  # topic_id
+    
+    def __init__(self, topic_manager: TopicManager, goal_manager: GoalManager):
+        super().__init__()
+        self.topic_manager = topic_manager
+        self.goal_manager = goal_manager
+        self.current_topics = []
+        
+        self.init_ui()
+        self.refresh_topics()
+        
+        # Connect signals
+        self.topic_manager.topic_created.connect(self.refresh_topics)
+        self.topic_manager.topic_updated.connect(self.refresh_topics)
+        self.goal_manager.goal_updated.connect(self.refresh_topics)
+    
+    def init_ui(self):
+        """Initialize the topic overview UI"""
+        layout = QVBoxLayout(self)
+        
+        # Header
+        header_layout = QHBoxLayout()
+        
+        title_label = QLabel("📚 Topic Overview")
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(14)
+        title_label.setFont(font)
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # Add topic button
+        self.add_topic_btn = QPushButton("➕ New Topic")
+        self.add_topic_btn.clicked.connect(self.create_new_topic)
+        header_layout.addWidget(self.add_topic_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Topics scroll area
+        self.topics_scroll = QScrollArea()
+        self.topics_scroll.setWidgetResizable(True)
+        self.topics_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        self.topics_container = QWidget()
+        self.topics_layout = QVBoxLayout(self.topics_container)
+        self.topics_layout.addStretch()
+        
+        self.topics_scroll.setWidget(self.topics_container)
+        layout.addWidget(self.topics_scroll)
+    
+    def refresh_topics(self):
+        """Refresh topic display"""
+        # Clear existing topics
+        for i in reversed(range(self.topics_layout.count() - 1)):
+            child = self.topics_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+        
+        # Get updated topic summaries
+        self.current_topics = self.topic_manager.get_all_topic_summaries()
+        
+        # Add topic cards
+        for topic_summary in self.current_topics:
+            topic_card = self.create_topic_card(topic_summary)
+            self.topics_layout.insertWidget(self.topics_layout.count() - 1, topic_card)
+    
+    def create_topic_card(self, topic_summary: TopicSummary) -> QWidget:
+        """Create a topic card widget"""
+        card = QFrame()
+        card.setFrameStyle(QFrame.Shape.Box)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: white;
+                border: 2px solid {topic_summary.color};
+                border-radius: 8px;
+                margin: 4px;
+                padding: 8px;
+            }}
+            QFrame:hover {{
+                background-color: #f8f9fa;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        
+        # Header with topic name and icon
+        header_layout = QHBoxLayout()
+        
+        name_label = QLabel(f"{topic_summary.icon} {topic_summary.name}")
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(12)
+        name_label.setFont(font)
+        header_layout.addWidget(name_label)
+        
+        header_layout.addStretch()
+        
+        # Focus button
+        focus_btn = QPushButton("🎯 Focus")
+        focus_btn.clicked.connect(lambda: self.focus_topic_requested.emit(topic_summary.id))
+        focus_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #7E22CE;
+                color: white;
+                border: none;
+                padding: 4px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #6B21A8;
+            }
+        """)
+        header_layout.addWidget(focus_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Description
+        if topic_summary.description:
+            desc_label = QLabel(topic_summary.description)
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet("color: #666; margin: 4px 0;")
+            layout.addWidget(desc_label)
+        
+        # Progress bar
+        progress_bar = QProgressBar()
+        progress_bar.setValue(int(topic_summary.stats.completion_percentage))
+        progress_bar.setTextVisible(True)
+        progress_bar.setFormat(f"{topic_summary.stats.completion_percentage:.1f}%")
+        layout.addWidget(progress_bar)
+        
+        # Statistics grid
+        stats_layout = QHBoxLayout()
+        
+        # Documents
+        docs_label = QLabel(f"📄 {topic_summary.stats.total_documents} docs")
+        docs_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        stats_layout.addWidget(docs_label)
+        
+        # Time
+        time_label = QLabel(f"⏱️ {topic_summary.stats.time_spent:.0f}m")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        stats_layout.addWidget(time_label)
+        
+        # Notes
+        notes_label = QLabel(f"📝 {topic_summary.stats.notes_count} notes")
+        notes_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        stats_layout.addWidget(notes_label)
+        
+        # Goals
+        goals_label = QLabel(f"🎯 {topic_summary.stats.active_goals} goals")
+        goals_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        stats_layout.addWidget(goals_label)
+        
+        layout.addLayout(stats_layout)
+        
+        # Estimated completion time
+        if topic_summary.stats.estimated_time_remaining > 0:
+            eta_label = QLabel(f"🏁 ~{topic_summary.stats.estimated_time_remaining:.0f} min remaining")
+            eta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            eta_label.setStyleSheet("color: #4169e1; font-weight: bold;")
+            layout.addWidget(eta_label)
+        
+        # Make card clickable
+        card.mousePressEvent = lambda event: self.topic_selected.emit(topic_summary.id)
+        
+        return card
+    
+    def create_new_topic(self):
+        """Open dialog to create a new topic"""
+        dialog = CreateTopicDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            topic_data = dialog.get_topic_data()
+            self.topic_manager.create_topic(
+                name=topic_data['name'],
+                description=topic_data['description'],
+                color=topic_data['color'],
+                icon=topic_data['icon']
+            )
+
+class CreateTopicDialog(QDialog):
+    """Dialog for creating new topics"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Topic")
+        self.setModal(True)
+        self.resize(400, 300)
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize dialog UI"""
+        layout = QVBoxLayout(self)
+        
+        # Topic name
+        layout.addWidget(QLabel("Topic Name:"))
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g., Machine Learning, History, Fiction")
+        layout.addWidget(self.name_input)
+        
+        # Description
+        layout.addWidget(QLabel("Description:"))
+        self.desc_input = QTextEdit()
+        self.desc_input.setPlaceholderText("Optional description of this topic...")
+        self.desc_input.setMaximumHeight(80)
+        layout.addWidget(self.desc_input)
+        
+        # Icon selection
+        layout.addWidget(QLabel("Icon:"))
+        self.icon_combo = QComboBox()
+        icons = ["📚", "📖", "📝", "🎓", "🔬", "💼", "🏥", "⚖️", "🎨", "🏗️"]
+        self.icon_combo.addItems(icons)
+        layout.addWidget(self.icon_combo)
+        
+        # Color selection
+        layout.addWidget(QLabel("Color:"))
+        self.color_combo = QComboBox()
+        colors = [
+            ("#7E22CE", "Purple"), ("#DC2626", "Red"), ("#EA580C", "Orange"),
+            ("#CA8A04", "Yellow"), ("#16A34A", "Green"), ("#2563EB", "Blue")
+        ]
+        for color_code, color_name in colors:
+            self.color_combo.addItem(color_name, color_code)
+        layout.addWidget(self.color_combo)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        create_btn = QPushButton("Create Topic")
+        create_btn.clicked.connect(self.accept)
+        create_btn.setDefault(True)
+        button_layout.addWidget(create_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def get_topic_data(self) -> dict:
+        """Get topic data from dialog"""
+        return {
+            'name': self.name_input.text().strip(),
+            'description': self.desc_input.toPlainText().strip(),
+            'icon': self.icon_combo.currentText(),
+            'color': self.color_combo.currentData()
+        }
+
+class GoalsDashboardWidget(QWidget):
+    """Widget showing goals dashboard with progress tracking"""
+    
+    def __init__(self, goal_manager: GoalManager, topic_manager: TopicManager):
+        super().__init__()
+        self.goal_manager = goal_manager
+        self.topic_manager = topic_manager
+        
+        self.init_ui()
+        self.refresh_goals()
+        
+        # Connect signals
+        self.goal_manager.goal_created.connect(self.refresh_goals)
+        self.goal_manager.goal_updated.connect(self.refresh_goals)
+        self.goal_manager.goal_completed.connect(self.on_goal_completed)
+    
+    def init_ui(self):
+        """Initialize goals dashboard UI"""
+        layout = QVBoxLayout(self)
+        
+        # Header
+        header_layout = QHBoxLayout()
+        
+        title_label = QLabel("🎯 Goals Dashboard")
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(14)
+        title_label.setFont(font)
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # Add goal button
+        self.add_goal_btn = QPushButton("➕ New Goal")
+        self.add_goal_btn.clicked.connect(self.create_new_goal)
+        header_layout.addWidget(self.add_goal_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Daily progress summary
+        self.daily_summary = QGroupBox("📅 Today's Progress")
+        self.daily_summary_layout = QVBoxLayout(self.daily_summary)
+        
+        self.daily_progress_text = QTextEdit()
+        self.daily_progress_text.setMaximumHeight(100)
+        self.daily_progress_text.setReadOnly(True)
+        self.daily_summary_layout.addWidget(self.daily_progress_text)
+        
+        layout.addWidget(self.daily_summary)
+        
+        # Active goals list
+        self.goals_group = QGroupBox("🎯 Active Goals")
+        self.goals_layout = QVBoxLayout(self.goals_group)
+        
+        self.goals_scroll = QScrollArea()
+        self.goals_scroll.setWidgetResizable(True)
+        
+        self.goals_container = QWidget()
+        self.goals_container_layout = QVBoxLayout(self.goals_container)
+        self.goals_container_layout.addStretch()
+        
+        self.goals_scroll.setWidget(self.goals_container)
+        self.goals_layout.addWidget(self.goals_scroll)
+        
+        layout.addWidget(self.goals_group)
+    
+    def refresh_goals(self):
+        """Refresh goals display"""
+        # Update daily summary
+        self.update_daily_summary()
+        
+        # Clear existing goals
+        for i in reversed(range(self.goals_container_layout.count() - 1)):
+            child = self.goals_container_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+        
+        # Get active goals
+        active_goals = self.goal_manager.get_active_goals()
+        
+        # Add goal cards
+        for goal_summary in active_goals:
+            goal_card = self.create_goal_card(goal_summary)
+            self.goals_container_layout.insertWidget(
+                self.goals_container_layout.count() - 1, goal_card
+            )
+    
+    def update_daily_summary(self):
+        """Update daily progress summary"""
+        dashboard_data = self.goal_manager.get_daily_goals_dashboard()
+        
+        summary_text = f"""
+📊 Daily Goal Progress: {dashboard_data['daily_completion_percentage']:.1f}%
+
+⏱️ Time Goals: {dashboard_data['current_progress']['time']:.0f} / {dashboard_data['total_daily_target']['time']:.0f} minutes
+📄 Page Goals: {dashboard_data['current_progress']['pages']:.0f} / {dashboard_data['total_daily_target']['pages']:.0f} pages
+
+✅ On Track: {dashboard_data['goals_on_track']} goals
+⚠️ Behind: {dashboard_data['goals_behind']} goals
+        """.strip()
+        
+        self.daily_progress_text.setText(summary_text)
+    
+    def create_goal_card(self, goal_summary: GoalSummary) -> QWidget:
+        """Create a goal card widget"""
+        card = QFrame()
+        card.setFrameStyle(QFrame.Shape.Box)
+        
+        # Status color coding
+        status_colors = {
+            GoalStatus.ON_TRACK: "#16A34A",
+            GoalStatus.AHEAD: "#059669", 
+            GoalStatus.BEHIND: "#EA580C",
+            GoalStatus.AT_RISK: "#DC2626",
+            GoalStatus.COMPLETED: "#7C3AED"
+        }
+        
+        status_color = status_colors.get(goal_summary.progress.status, "#6B7280")
+        
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: white;
+                border: 2px solid {status_color};
+                border-radius: 8px;
+                margin: 4px;
+                padding: 8px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        
+        # Goal header
+        header_layout = QHBoxLayout()
+        
+        # Goal type icon and target
+        goal_type_icons = {
+            GoalType.TIME_BASED: "⏱️",
+            GoalType.PAGE_BASED: "📄", 
+            GoalType.DEADLINE_BASED: "📅"
+        }
+        
+        icon = goal_type_icons.get(goal_summary.goal_type, "🎯")
+        goal_text = f"{icon} {goal_summary.target_value:.0f} {goal_summary.goal_type.value}"
+        
+        goal_label = QLabel(goal_text)
+        font = QFont()
+        font.setBold(True)
+        goal_label.setFont(font)
+        header_layout.addWidget(goal_label)
+        
+        header_layout.addStretch()
+        
+        # Status badge
+        status_badge = QLabel(goal_summary.progress.status.value.replace('_', ' ').title())
+        status_badge.setStyleSheet(f"""
+            QLabel {{
+                background-color: {status_color};
+                color: white;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 10px;
+                font-weight: bold;
+            }}
+        """)
+        header_layout.addWidget(status_badge)
+        
+        layout.addLayout(header_layout)
+        
+        # Target context (topic or document)
+        if goal_summary.topic_name:
+            context_label = QLabel(f"📚 Topic: {goal_summary.topic_name}")
+        elif goal_summary.document_title:
+            context_label = QLabel(f"📄 Document: {goal_summary.document_title}")
+        else:
+            context_label = QLabel("🌐 General Goal")
+        
+        context_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(context_label)
+        
+        # Progress bar
+        progress_bar = QProgressBar()
+        progress_bar.setValue(int(goal_summary.progress.progress_percentage))
+        progress_bar.setTextVisible(True)
+        progress_bar.setFormat(f"{goal_summary.current_value:.0f} / {goal_summary.target_value:.0f}")
+        layout.addWidget(progress_bar)
+        
+        # Goal details
+        details_layout = QHBoxLayout()
+        
+        # Progress percentage
+        progress_label = QLabel(f"📊 {goal_summary.progress.progress_percentage:.1f}%")
+        details_layout.addWidget(progress_label)
+        
+        # Days remaining
+        if goal_summary.progress.days_remaining > 0:
+            days_label = QLabel(f"📅 {goal_summary.progress.days_remaining} days left")
+            details_layout.addWidget(days_label)
+        
+        # Daily target
+        if goal_summary.progress.daily_target > 0:
+            daily_label = QLabel(f"📈 {goal_summary.progress.daily_target:.1f}/day")
+            details_layout.addWidget(daily_label)
+        
+        layout.addLayout(details_layout)
+        
+        # Adaptive suggestion
+        if goal_summary.progress.adaptive_suggestion:
+            suggestion_label = QLabel(f"💡 {goal_summary.progress.adaptive_suggestion}")
+            suggestion_label.setWordWrap(True)
+            suggestion_label.setStyleSheet("""
+                QLabel {
+                    background-color: #f0f8ff;
+                    border: 1px solid #4169e1;
+                    border-radius: 4px;
+                    padding: 4px;
+                    font-size: 11px;
+                }
+            """)
+            layout.addWidget(suggestion_label)
+        
+        return card
+    
+    def create_new_goal(self):
+        """Open dialog to create a new goal"""
+        dialog = CreateGoalDialog(self.topic_manager, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            goal_data = dialog.get_goal_data()
+            self.goal_manager.create_goal(
+                goal_type=goal_data['goal_type'],
+                target_value=goal_data['target_value'],
+                target_date=goal_data['target_date'],
+                topic_id=goal_data['topic_id'],
+                document_id=goal_data['document_id']
+            )
+    
+    def on_goal_completed(self, goal_id: int, description: str):
+        """Handle goal completion"""
+        QMessageBox.information(
+            self,
+            "🎉 Goal Completed!",
+            f"Congratulations! You've completed:\n{description}"
+        )
+
+class CreateGoalDialog(QDialog):
+    """Dialog for creating new goals"""
+    
+    def __init__(self, topic_manager: TopicManager, parent=None):
+        super().__init__(parent)
+        self.topic_manager = topic_manager
+        self.setWindowTitle("Create New Goal")
+        self.setModal(True)
+        self.resize(400, 350)
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize dialog UI"""
+        layout = QVBoxLayout(self)
+        
+        # Goal type
+        layout.addWidget(QLabel("Goal Type:"))
+        self.goal_type_combo = QComboBox()
+        self.goal_type_combo.addItem("⏱️ Time-Based (minutes)", GoalType.TIME_BASED)
+        self.goal_type_combo.addItem("📄 Page-Based", GoalType.PAGE_BASED)
+        self.goal_type_combo.addItem("📅 Deadline-Based", GoalType.DEADLINE_BASED)
+        self.goal_type_combo.currentTextChanged.connect(self.on_goal_type_changed)
+        layout.addWidget(self.goal_type_combo)
+        
+        # Target value
+        layout.addWidget(QLabel("Target Value:"))
+        target_layout = QHBoxLayout()
+        self.target_spinbox = QSpinBox()
+        self.target_spinbox.setRange(1, 10000)
+        self.target_spinbox.setValue(100)
+        target_layout.addWidget(self.target_spinbox)
+        
+        self.target_unit_label = QLabel("pages")
+        target_layout.addWidget(self.target_unit_label)
+        target_layout.addStretch()
+        layout.addLayout(target_layout)
+        
+        # Target date (for deadline goals)
+        layout.addWidget(QLabel("Target Date:"))
+        self.target_date = QDateEdit()
+        self.target_date.setDate(QDate.currentDate().addDays(7))
+        self.target_date.setCalendarPopup(True)
+        self.target_date.setEnabled(False)
+        layout.addWidget(self.target_date)
+        
+        # Scope selection
+        layout.addWidget(QLabel("Goal Scope:"))
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItem("🌐 General Goal", "general")
+        
+        # Add topics
+        topics = self.topic_manager.get_all_topics()
+        for topic in topics:
+            self.scope_combo.addItem(f"📚 Topic: {topic.name}", f"topic_{topic.id}")
+        
+        layout.addWidget(self.scope_combo)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        create_btn = QPushButton("Create Goal")
+        create_btn.clicked.connect(self.accept)
+        create_btn.setDefault(True)
+        button_layout.addWidget(create_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def on_goal_type_changed(self):
+        """Handle goal type change"""
+        goal_type = self.goal_type_combo.currentData()
+        
+        if goal_type == GoalType.TIME_BASED:
+            self.target_unit_label.setText("minutes")
+            self.target_spinbox.setValue(150)  # 2.5 hours default
+            self.target_date.setEnabled(False)
+        elif goal_type == GoalType.PAGE_BASED:
+            self.target_unit_label.setText("pages")
+            self.target_spinbox.setValue(100)
+            self.target_date.setEnabled(False)
+        elif goal_type == GoalType.DEADLINE_BASED:
+            self.target_unit_label.setText("by deadline")
+            self.target_date.setEnabled(True)
+    
+    def get_goal_data(self) -> dict:
+        """Get goal data from dialog"""
+        scope_data = self.scope_combo.currentData()
+        topic_id = None
+        document_id = None
+        
+        if scope_data.startswith("topic_"):
+            topic_id = int(scope_data.split("_")[1])
+        
+        target_date = None
+        if self.target_date.isEnabled():
+            target_date = self.target_date.date().toPython()
+            target_date = datetime.combine(target_date, datetime.min.time())
+        
+        return {
+            'goal_type': self.goal_type_combo.currentData(),
+            'target_value': self.target_spinbox.value(),
+            'target_date': target_date,
+            'topic_id': topic_id,
+            'document_id': document_id
+        }
+
+class Stage5MainWindow(QMainWindow):
+    """Enhanced main window with Stage 5 features"""
     
     def __init__(self):
         super().__init__()
-        self.pdf_viewer = None
         
         # Initialize managers
+        self.stage5_manager = Stage5Manager(db_manager)
+        self.topic_manager = TopicManager()
+        self.goal_manager = GoalManager()
+        self.enhanced_focus_manager = EnhancedFocusManager()
+        
+        # Existing managers
         self.timer_manager = TimerManager()
-        self.focus_manager = FocusManager()
         self.analytics_manager = AnalyticsManager()
         self.notification_manager = NotificationManager()
         
-        # Initialize time estimation
-        self.time_estimator = TimeEstimator()
-        self.reading_predictor = ReadingPredictor()
-        
-        # Initialize note manager
-        self.note_manager = NoteManager()
-        
-        # Timer state tracking - FIXED
-        self.current_timer_mode = TimerMode.REGULAR
-        self.timer_active = False
-        self.is_break_mode = False
+        # Current state
+        self.current_topic_id = None
+        self.focus_session_active = False
         
         self.init_ui()
         self.init_database()
         self.init_menu_bar()
-        self.init_toolbar()
-        self.init_status_bar()
-        self.init_shortcuts()
         self.connect_signals()
+        
+        # Auto-refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_all_data)
+        self.refresh_timer.start(30000)  # Refresh every 30 seconds
     
     def init_ui(self):
-        """Initialize the user interface"""
-        self.setWindowTitle("SprintReader - PDF Reading & Note-Taking")
-        self.setGeometry(100, 100, 1800, 1000)
+        """Initialize the enhanced UI"""
+        self.setWindowTitle("SprintReader Stage 5 - Topic-Based Goal Setting & Focus Mode")
+        self.setGeometry(100, 100, 1600, 1000)
         
         # Create main widget and layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
         
-        # Add timer toolbar
-        self.create_timer_toolbar(main_layout)
+        # Enhanced toolbar
+        self.create_enhanced_toolbar(main_layout)
         
-        # Create and set the PDF viewer with note-taking
+        # Main content area with tabs
+        self.content_tabs = QTabWidget()
+        
+        # Tab 1: Topic Overview
+        self.topic_overview = TopicOverviewWidget(self.topic_manager, self.goal_manager)
+        self.content_tabs.addTab(self.topic_overview, "📚 Topics")
+        
+        # Tab 2: Goals Dashboard
+        self.goals_dashboard = GoalsDashboardWidget(self.goal_manager, self.topic_manager)
+        self.content_tabs.addTab(self.goals_dashboard, "🎯 Goals")
+        
+        # Tab 3: PDF Reader (enhanced)
         self.pdf_viewer = PDFViewerWidget()
-        main_layout.addWidget(self.pdf_viewer)
+        self.content_tabs.addTab(self.pdf_viewer, "📖 Reader")
         
-        # Connect signals
-        self.pdf_viewer.document_opened.connect(self.on_document_opened)
-        self.pdf_viewer.page_changed.connect(self.on_page_changed)
-        if hasattr(self.pdf_viewer, 'note_created'):
-            self.pdf_viewer.note_created.connect(self.on_note_created)
+        # Tab 4: Focus Analytics
+        self.create_focus_analytics_tab()
+        self.content_tabs.addTab(self.focus_analytics_widget, "📊 Focus Analytics")
+        
+        main_layout.addWidget(self.content_tabs)
+        
+        # Enhanced status bar
+        self.create_enhanced_status_bar(main_layout)
     
-    def create_timer_toolbar(self, parent_layout):
-        """Create the timer and focus controls toolbar"""
-        timer_layout = QHBoxLayout()
+    def create_enhanced_toolbar(self, parent_layout):
+        """Create enhanced toolbar with Stage 5 features"""
+        toolbar_layout = QHBoxLayout()
         
-        # Timer mode selection
-        timer_layout.addWidget(QLabel("Timer Mode:"))
-        self.timer_mode_combo = QComboBox()
-        self.timer_mode_combo.addItems(["Regular", "Pomodoro", "Sprint", "Custom"])
-        self.timer_mode_combo.currentTextChanged.connect(self.on_timer_mode_changed)
-        timer_layout.addWidget(self.timer_mode_combo)
+        # Focus mode controls
+        focus_group = QGroupBox("🎯 Focus Mode")
+        focus_layout = QHBoxLayout(focus_group)
         
-        # Custom duration
-        self.custom_duration_label = QLabel("Duration:")
-        self.custom_duration_spinbox = QSpinBox()
-        self.custom_duration_spinbox.setRange(1, 120)
-        self.custom_duration_spinbox.setValue(25)
-        self.custom_duration_spinbox.setSuffix(" min")
-        timer_layout.addWidget(self.custom_duration_label)
-        timer_layout.addWidget(self.custom_duration_spinbox)
+        # Focus level selection
+        self.focus_level_combo = QComboBox()
+        self.focus_level_combo.addItem("Minimal", FocusLevel.MINIMAL)
+        self.focus_level_combo.addItem("Standard", FocusLevel.STANDARD)
+        self.focus_level_combo.addItem("Deep", FocusLevel.DEEP)
+        self.focus_level_combo.addItem("Immersive", FocusLevel.IMMERSIVE)
+        self.focus_level_combo.setCurrentIndex(1)  # Standard default
+        focus_layout.addWidget(self.focus_level_combo)
         
-        # Initially hide custom duration controls
-        self.custom_duration_label.hide()
-        self.custom_duration_spinbox.hide()
-        
-        timer_layout.addWidget(QLabel(" | "))
-        
-        # Timer controls
-        self.start_timer_btn = QPushButton("🍅 Start Session")
-        self.start_timer_btn.clicked.connect(self.start_timer_session)
-        timer_layout.addWidget(self.start_timer_btn)
-        
-        self.pause_timer_btn = QPushButton("⏸️ Pause")
-        self.pause_timer_btn.clicked.connect(self.pause_timer_session)
-        self.pause_timer_btn.setEnabled(False)
-        timer_layout.addWidget(self.pause_timer_btn)
-        
-        self.stop_timer_btn = QPushButton("⏹️ Stop")
-        self.stop_timer_btn.clicked.connect(self.stop_timer_session)
-        self.stop_timer_btn.setEnabled(False)
-        timer_layout.addWidget(self.stop_timer_btn)
-        
-        timer_layout.addWidget(QLabel(" | "))
-        
-        # Timer display - ENHANCED
-        self.timer_display = QLabel("00:00")
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(16)  # Larger font for better visibility
-        self.timer_display.setFont(font)
-        self.timer_display.setStyleSheet("""
-            QLabel {
-                background-color: #f0f0f0;
-                border: 2px solid #ccc;
-                border-radius: 8px;
+        # Focus session button
+        self.focus_session_btn = QPushButton("🎯 Start Focus Session")
+        self.focus_session_btn.clicked.connect(self.toggle_focus_session)
+        self.focus_session_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #7E22CE;
+                color: white;
+                border: none;
                 padding: 8px 16px;
-                min-width: 80px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #6B21A8;
             }
         """)
-        self.timer_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        timer_layout.addWidget(self.timer_display)
+        focus_layout.addWidget(self.focus_session_btn)
         
-        timer_layout.addWidget(QLabel(" | "))
+        toolbar_layout.addWidget(focus_group)
         
-        # Focus mode toggle
-        self.focus_mode_btn = QPushButton("🎯 Focus Mode")
-        self.focus_mode_btn.clicked.connect(self.toggle_focus_mode)
-        self.focus_mode_btn.setCheckable(True)
-        timer_layout.addWidget(self.focus_mode_btn)
+        # Current topic selector
+        topic_group = QGroupBox("📚 Current Topic")
+        topic_layout = QHBoxLayout(topic_group)
         
-        # Stretch to center everything
-        timer_layout.addStretch()
+        self.current_topic_combo = QComboBox()
+        self.current_topic_combo.addItem("No Topic Selected", None)
+        self.update_topic_selector()
+        topic_layout.addWidget(self.current_topic_combo)
         
-        # Session info
-        self.session_info_label = QLabel("📚 Ready to Focus & Take Notes")
-        timer_layout.addWidget(self.session_info_label)
+        toolbar_layout.addWidget(topic_group)
         
-        parent_layout.addLayout(timer_layout)
+        # Quick actions
+        actions_group = QGroupBox("⚡ Quick Actions")
+        actions_layout = QHBoxLayout(actions_group)
+        
+        quick_goal_btn = QPushButton("🎯 Quick Goal")
+        quick_goal_btn.clicked.connect(self.create_quick_goal)
+        actions_layout.addWidget(quick_goal_btn)
+        
+        topic_progress_btn = QPushButton("📊 Topic Progress")
+        topic_progress_btn.clicked.connect(self.show_topic_progress)
+        actions_layout.addWidget(topic_progress_btn)
+        
+        toolbar_layout.addWidget(actions_group)
+        
+        toolbar_layout.addStretch()
+        
+        # Focus session info
+        self.focus_session_info = QLabel("🎯 Ready for Focus")
+        self.focus_session_info.setStyleSheet("font-weight: bold; color: #7E22CE;")
+        toolbar_layout.addWidget(self.focus_session_info)
+        
+        parent_layout.addLayout(toolbar_layout)
+    
+    def create_focus_analytics_tab(self):
+        """Create focus analytics tab"""
+        self.focus_analytics_widget = QWidget()
+        layout = QVBoxLayout(self.focus_analytics_widget)
+        
+        # Analytics header
+        header_label = QLabel("📊 Focus & Productivity Analytics")
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(14)
+        header_label.setFont(font)
+        layout.addWidget(header_label)
+        
+        # Analytics content
+        self.focus_analytics_text = QTextEdit()
+        self.focus_analytics_text.setReadOnly(True)
+        layout.addWidget(self.focus_analytics_text)
+        
+        # Refresh analytics
+        refresh_btn = QPushButton("🔄 Refresh Analytics")
+        refresh_btn.clicked.connect(self.update_focus_analytics)
+        layout.addWidget(refresh_btn)
+        
+        # Initial load
+        self.update_focus_analytics()
+    
+    def create_enhanced_status_bar(self, parent_layout):
+        """Create enhanced status bar"""
+        status_layout = QHBoxLayout()
+        
+        # Current session info
+        self.session_status = QLabel("📚 Ready")
+        status_layout.addWidget(self.session_status)
+        
+        status_layout.addWidget(QLabel(" | "))
+        
+        # Daily progress
+        self.daily_progress_label = QLabel("📅 Daily: 0%")
+        status_layout.addWidget(self.daily_progress_label)
+        
+        status_layout.addWidget(QLabel(" | "))
+        
+        # Active goals
+        self.active_goals_label = QLabel("🎯 Goals: 0 active")
+        status_layout.addWidget(self.active_goals_label)
+        
+        status_layout.addStretch()
+        
+        # Focus productivity score
+        self.productivity_score_label = QLabel("⚡ Productivity: --")
+        status_layout.addWidget(self.productivity_score_label)
+        
+        parent_layout.addLayout(status_layout)
+        
+        # Start status update timer
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self.update_status_bar)
+        self.status_timer.start(5000)  # Update every 5 seconds
     
     def init_database(self):
-        """Initialize database connection"""
+        """Initialize database with Stage 5 tables"""
         try:
-            db_manager.create_tables()
-            session = db_manager.get_session()
-            session.close()
-            print("✅ Database Connected Successfully")
+            self.stage5_manager.create_stage5_tables()
+            print("✅ Stage 5 Database initialized")
         except Exception as e:
-            print(f"❌ Database Connection Error: {str(e)}")
+            print(f"❌ Database initialization error: {e}")
             QMessageBox.critical(
-                self, 
-                "Database Error", 
-                f"Failed to connect to database:\n{str(e)}"
+                self,
+                "Database Error",
+                f"Failed to initialize Stage 5 database:\n{str(e)}"
             )
     
-    def init_toolbar(self):
-        """Initialize toolbar elements - FIXED"""
-        # Create separate timer for UI updates
-        self.ui_update_timer = QTimer()
-        self.ui_update_timer.timeout.connect(self.update_timer_display)
-        self.ui_update_timer.start(1000)  # Update every second
-        
-        print("✅ UI update timer started")
-    
     def init_menu_bar(self):
-        """Initialize the menu bar"""
+        """Initialize enhanced menu bar"""
         menubar = self.menuBar()
         
-        # File Menu
+        # File Menu (enhanced)
         file_menu = menubar.addMenu('&File')
         
         open_action = QAction('&Open PDF...', self)
@@ -203,636 +868,442 @@ class SprintReaderMainWindow(QMainWindow):
         
         file_menu.addSeparator()
         
-        if hasattr(self.pdf_viewer, 'export_notes'):
-            export_notes_action = QAction('&Export Notes...', self)
-            export_notes_action.setShortcut(QKeySequence('Ctrl+E'))
-            export_notes_action.triggered.connect(self.export_current_notes)
-            file_menu.addAction(export_notes_action)
+        export_topic_action = QAction('Export &Topic Summary...', self)
+        export_topic_action.triggered.connect(self.export_current_topic)
+        file_menu.addAction(export_topic_action)
         
-        exit_action = QAction('E&xit', self)
-        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        # Focus Menu (new)
+        focus_menu = menubar.addMenu('&Focus')
         
-        # View Menu
-        view_menu = menubar.addMenu('&View')
+        start_focus_action = QAction('&Start Focus Session', self)
+        start_focus_action.setShortcut(QKeySequence('F11'))
+        start_focus_action.triggered.connect(self.toggle_focus_session)
+        focus_menu.addAction(start_focus_action)
         
-        focus_action = QAction('&Focus Mode', self)
-        focus_action.setShortcut(QKeySequence('F11'))
-        focus_action.triggered.connect(self.toggle_focus_mode)
-        view_menu.addAction(focus_action)
+        focus_topic_action = QAction('Focus on Current &Topic', self)
+        focus_topic_action.setShortcut(QKeySequence('Ctrl+Shift+F'))
+        focus_topic_action.triggered.connect(self.focus_on_current_topic)
+        focus_menu.addAction(focus_topic_action)
         
-        # Timer Menu
-        timer_menu = menubar.addMenu('&Timer')
+        # Goals Menu (new)
+        goals_menu = menubar.addMenu('&Goals')
         
-        pomodoro_action = QAction('Start &Pomodoro', self)
-        pomodoro_action.setShortcut(QKeySequence('Ctrl+P'))
-        pomodoro_action.triggered.connect(lambda: self.start_specific_timer(TimerMode.POMODORO))
-        timer_menu.addAction(pomodoro_action)
+        quick_goal_action = QAction('&Quick Goal...', self)
+        quick_goal_action.setShortcut(QKeySequence('Ctrl+G'))
+        quick_goal_action.triggered.connect(self.create_quick_goal)
+        goals_menu.addAction(quick_goal_action)
         
-        sprint_action = QAction('Start &Sprint', self)
-        sprint_action.setShortcut(QKeySequence('Ctrl+Shift+S'))
-        sprint_action.triggered.connect(lambda: self.start_specific_timer(TimerMode.SPRINT))
-        timer_menu.addAction(sprint_action)
-        
-        # Notes Menu
-        if hasattr(self.pdf_viewer, 'add_quick_note'):
-            notes_menu = menubar.addMenu('&Notes')
-            
-            quick_note_action = QAction('&Quick Note', self)
-            quick_note_action.setShortcut(QKeySequence('Ctrl+N'))
-            quick_note_action.triggered.connect(self.pdf_viewer.add_quick_note)
-            notes_menu.addAction(quick_note_action)
-            
-            search_notes_action = QAction('&Search Notes...', self)
-            search_notes_action.setShortcut(QKeySequence('Ctrl+F'))
-            search_notes_action.triggered.connect(self.search_notes)
-            notes_menu.addAction(search_notes_action)
-        
-        # Analytics Menu
-        analytics_menu = menubar.addMenu('&Analytics')
-        
-        daily_stats_action = QAction('&Daily Statistics', self)
-        daily_stats_action.triggered.connect(self.show_daily_stats)
-        analytics_menu.addAction(daily_stats_action)
-        
-        time_estimate_action = QAction("&Time Estimates", self)
-        time_estimate_action.triggered.connect(self.show_time_estimates)
-        analytics_menu.addAction(time_estimate_action)
-        
-        # Help Menu
-        help_menu = menubar.addMenu('&Help')
-        
-        about_action = QAction('&About', self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
-    
-    def init_status_bar(self):
-        """Initialize the status bar"""
-        self.status_bar = self.statusBar()
-        self.status_bar.showMessage("Ready - Open a PDF and start taking notes!")
-    
-    def init_shortcuts(self):
-        """Initialize keyboard shortcuts"""
-        pass
+        goals_progress_action = QAction('&Goals Progress', self)
+        goals_progress_action.triggered.connect(self.show_goals_progress)
+        goals_menu.addAction(goals_progress_action)
     
     def connect_signals(self):
-        """Connect manager signals - ENHANCED"""
-        print("🔗 Connecting timer signals...")
+        """Connect all Stage 5 signals"""
+        # Topic signals
+        self.topic_overview.topic_selected.connect(self.on_topic_selected)
+        self.topic_overview.focus_topic_requested.connect(self.focus_on_topic)
         
-        # Timer signals - FIXED CONNECTIONS
-        self.timer_manager.timer_started.connect(self.on_timer_started)
-        self.timer_manager.timer_finished.connect(self.on_timer_finished)
-        self.timer_manager.timer_paused.connect(self.on_timer_paused)
-        self.timer_manager.timer_resumed.connect(self.on_timer_resumed)
-        self.timer_manager.timer_stopped.connect(self.on_timer_stopped)
-        self.timer_manager.break_started.connect(self.on_break_started)
-        self.timer_manager.break_finished.connect(self.on_break_finished)
-        self.timer_manager.time_updated.connect(self.on_time_updated)
+        # Focus manager signals
+        self.enhanced_focus_manager.focus_session_started.connect(self.on_focus_session_started)
+        self.enhanced_focus_manager.focus_session_ended.connect(self.on_focus_session_ended)
+        self.enhanced_focus_manager.productivity_alert.connect(self.on_productivity_alert)
         
-        # Focus mode signals
-        self.focus_manager.focus_mode_enabled.connect(self.on_focus_enabled)
-        self.focus_manager.focus_mode_disabled.connect(self.on_focus_disabled)
-        
-        # Note manager signals
-        self.note_manager.note_created.connect(self.on_note_manager_note_created)
-        
-        print("✅ All signals connected")
+        # Goal manager signals
+        self.goal_manager.goal_completed.connect(self.on_goal_completed)
+        self.goal_manager.goal_at_risk.connect(self.on_goal_at_risk)
     
-    # FIXED TIMER METHODS
+    def toggle_focus_session(self):
+        """Toggle focus session on/off"""
+        if self.focus_session_active:
+            self.end_focus_session()
+        else:
+            self.start_focus_session()
     
-    def on_timer_mode_changed(self, mode_text):
-        """Handle timer mode change"""
-        print(f"🔄 Timer mode changed to: {mode_text}")
+    def start_focus_session(self):
+        """Start a focus session"""
+        focus_level = self.focus_level_combo.currentData()
+        current_topic_id = self.current_topic_combo.currentData()
         
-        mode_map = {
-            "Regular": TimerMode.REGULAR,
-            "Pomodoro": TimerMode.POMODORO,
-            "Sprint": TimerMode.SPRINT,
-            "Custom": TimerMode.CUSTOM
-        }
+        # Apply focus level to UI
+        self.enhanced_focus_manager.apply_focus_level(self, focus_level)
         
-        self.current_timer_mode = mode_map.get(mode_text, TimerMode.REGULAR)
+        # Start session tracking
+        session_id = self.enhanced_focus_manager.start_focus_session(
+            topic_id=current_topic_id
+        )
         
-        # Show/hide custom duration controls
-        is_custom = mode_text == "Custom"
-        self.custom_duration_label.setVisible(is_custom)
-        self.custom_duration_spinbox.setVisible(is_custom)
+        self.focus_session_active = True
+        self.focus_session_btn.setText("⏹️ End Focus Session")
         
-        # Update button text
-        mode_icons = {"Regular": "📖", "Pomodoro": "🍅", "Sprint": "⚡", "Custom": "⏱️"}
-        icon = mode_icons.get(mode_text, "📖")
-        self.start_timer_btn.setText(f"{icon} Start {mode_text}")
+        # Switch to PDF reader tab during focus
+        self.content_tabs.setCurrentIndex(2)  # PDF Reader tab
+        
+        print(f"🎯 Focus session started with {focus_level.value} level")
     
-    def start_timer_session(self):
-        """Start a timer session - FIXED"""
-        print(f"▶️ Starting {self.current_timer_mode.value} timer session")
+    def end_focus_session(self):
+        """End current focus session"""
+        # Remove focus mode
+        self.enhanced_focus_manager.remove_focus_mode(self)
         
-        if self.timer_active:
-            print("⚠️ Timer already active")
-            return
+        # End session tracking
+        session_summary = self.enhanced_focus_manager.end_focus_session()
         
-        success = False
-        try:
-            if self.current_timer_mode == TimerMode.POMODORO:
-                success = self.timer_manager.start_pomodoro()
-                print("🍅 Pomodoro timer started")
-            elif self.current_timer_mode == TimerMode.SPRINT:
-                success = self.timer_manager.start_sprint()
-                print("⚡ Sprint timer started")
-            elif self.current_timer_mode == TimerMode.CUSTOM:
-                duration = self.custom_duration_spinbox.value()
-                success = self.timer_manager.start_custom(duration)
-                print(f"⏱️ Custom timer started: {duration} minutes")
-            else:
-                # Regular mode - just track without timer
-                success = True
-                print("📖 Regular reading mode active")
+        self.focus_session_active = False
+        self.focus_session_btn.setText("🎯 Start Focus Session")
         
-            if success:
-                self.timer_active = True
-                self.is_break_mode = False
-                self._update_timer_controls(True)
-                print("✅ Timer started successfully")
-            else:
-                print("❌ Failed to start timer")
+        # Show session summary
+        if session_summary:
+            self.show_focus_session_summary(session_summary)
+        
+        print("📊 Focus session ended")
+    
+    def show_focus_session_summary(self, session_summary: dict):
+        """Show focus session summary dialog"""
+        summary_text = f"""
+🎯 Focus Session Complete!
+
+⏱️ Duration: {session_summary['duration']:.1f} minutes
+📄 Pages Read: {session_summary['pages_read']}
+⚡ Productivity Score: {session_summary['productivity_score']:.1f}/100
+🚫 Interruptions: {session_summary['interruptions']}
+🎯 Focus Level: {session_summary['focus_level'].title()}
+📈 Reading Speed: {session_summary['average_reading_speed']:.1f}s/page
+        """.strip()
+        
+        QMessageBox.information(self, "Session Complete", summary_text)
+    
+    def update_topic_selector(self):
+        """Update the current topic selector"""
+        current_selection = self.current_topic_combo.currentData()
+        self.current_topic_combo.clear()
+        self.current_topic_combo.addItem("No Topic Selected", None)
+        
+        topics = self.topic_manager.get_all_topics()
+        for topic in topics:
+            self.current_topic_combo.addItem(f"{topic.icon or '📚'} {topic.name}", topic.id)
+        
+        # Restore selection if possible
+        if current_selection:
+            for i in range(self.current_topic_combo.count()):
+                if self.current_topic_combo.itemData(i) == current_selection:
+                    self.current_topic_combo.setCurrentIndex(i)
+                    break
+    
+    def update_status_bar(self):
+        """Update status bar information"""
+        # Update daily progress
+        dashboard_data = self.goal_manager.get_daily_goals_dashboard()
+        self.daily_progress_label.setText(
+            f"📅 Daily: {dashboard_data['daily_completion_percentage']:.0f}%"
+        )
+        
+        # Update active goals
+        active_goals_count = dashboard_data['total_active_goals']
+        self.active_goals_label.setText(f"🎯 Goals: {active_goals_count} active")
+        
+        # Update productivity score if in focus session
+        if self.focus_session_active:
+            session_info = self.enhanced_focus_manager.get_current_session_info()
+            if session_info:
+                score = session_info['productivity_score']
+                self.productivity_score_label.setText(f"⚡ Productivity: {score:.0f}/100")
                 
-        except Exception as e:
-            print(f"❌ Error starting timer: {e}")
-            QMessageBox.warning(self, "Timer Error", f"Failed to start timer: {str(e)}")
+                # Update focus session info
+                duration = session_info['duration']
+                pages = session_info['pages_read']
+                self.focus_session_info.setText(
+                    f"🎯 Focus: {duration:.0f}m, {pages} pages, {score:.0f}% productive"
+                )
+        else:
+            self.productivity_score_label.setText("⚡ Productivity: --")
+            self.focus_session_info.setText("🎯 Ready for Focus")
     
-    def start_specific_timer(self, mode: TimerMode):
-        """Start a specific timer mode (for menu/shortcut actions)"""
-        print(f"🎯 Starting specific timer: {mode.value}")
+    def update_focus_analytics(self):
+        """Update focus analytics display"""
+        analytics = self.enhanced_focus_manager.get_focus_analytics(30)  # Last 30 days
+        recommendations = self.enhanced_focus_manager.get_focus_recommendations()
         
-        mode_index = {
-            TimerMode.REGULAR: 0,
-            TimerMode.POMODORO: 1,
-            TimerMode.SPRINT: 2,
-            TimerMode.CUSTOM: 3
-        }
+        analytics_text = f"""
+# 📊 Focus & Productivity Analytics (Last 30 Days)
+
+## 🎯 Session Overview
+- **Total Sessions:** {analytics.total_sessions}
+- **Total Focus Time:** {analytics.total_focus_time:.1f} minutes
+- **Average Session:** {analytics.average_session_length:.1f} minutes
+- **Average Productivity:** {analytics.average_productivity_score:.1f}/100
+
+## ⏰ Timing Insights
+- **Most Productive Time:** {analytics.most_productive_time}
+- **Consistency Score:** {analytics.consistency_score:.1f}%
+- **Interruption Rate:** {analytics.interruption_rate:.2f} per minute
+
+## 💡 Personalized Recommendations
+"""
         
-        self.timer_mode_combo.setCurrentIndex(mode_index.get(mode, 0))
-        self.start_timer_session()
+        for i, rec in enumerate(recommendations, 1):
+            analytics_text += f"{i}. {rec}\n"
+        
+        if analytics.total_sessions == 0:
+            analytics_text += "\n📝 **No focus sessions yet!** Start your first session to see analytics."
+        
+        self.focus_analytics_text.setPlainText(analytics_text)
     
-    def pause_timer_session(self):
-        """Pause current timer session - FIXED"""
-        print("⏸️ Pause/Resume timer")
-        
-        try:
-            if self.timer_manager.is_running():
-                self.timer_manager.pause()
-                self.pause_timer_btn.setText("▶️ Resume")
-                print("⏸️ Timer paused")
-            else:
-                self.timer_manager.resume()
-                self.pause_timer_btn.setText("⏸️ Pause")
-                print("▶️ Timer resumed")
-        except Exception as e:
-            print(f"❌ Error pausing/resuming timer: {e}")
+    def refresh_all_data(self):
+        """Refresh all data displays"""
+        self.topic_overview.refresh_topics()
+        self.goals_dashboard.refresh_goals()
+        self.update_topic_selector()
+        self.update_focus_analytics()
     
-    def stop_timer_session(self):
-        """Stop current timer session - FIXED"""
-        print("⏹️ Stopping timer session")
+    def on_topic_selected(self, topic_id: int):
+        """Handle topic selection"""
+        self.current_topic_id = topic_id
         
-        try:
-            self.timer_manager.stop()
-            self.timer_active = False
-            self.is_break_mode = False
-            self._update_timer_controls(False)
-            self.timer_display.setText("00:00")
-            self.timer_display.setStyleSheet("""
-                QLabel {
-                    background-color: #f0f0f0;
-                    border: 2px solid #ccc;
-                    border-radius: 8px;
-                    padding: 8px 16px;
-                    min-width: 80px;
-                }
-            """)
-            self.session_info_label.setText("📚 Ready to Focus & Take Notes")
-            print("✅ Timer stopped and controls reset")
-        except Exception as e:
-            print(f"❌ Error stopping timer: {e}")
-    
-    def update_timer_display(self):
-        """Update timer display every second - ENHANCED"""
-        try:
-            # Check if timer manager has any active timer
-            if self.timer_manager.is_running() or self.timer_manager.get_state().name in ["BREAK", "PAUSED"]:
-                time_str = self.timer_manager.get_formatted_time()
-                self.timer_display.setText(time_str)
-                
-                # Add visual feedback every 10 seconds
-                remaining = self.timer_manager.get_remaining_time()
-                if remaining % 10 == 0 and remaining > 0:
-                    print(f"🕐 Timer: {time_str}")
-                
-                # Update session info based on state
-                state = self.timer_manager.get_state()
-                if state.name == "RUNNING":
-                    mode = self.timer_manager.get_current_mode().value.title()
-                    self.session_info_label.setText(f"🎯 {mode} Session Active")
-                    # Green background for active timer
-                    self.timer_display.setStyleSheet("""
-                        QLabel {
-                            background-color: #e8f5e8;
-                            border: 2px solid #4caf50;
-                            border-radius: 8px;
-                            padding: 8px 16px;
-                            min-width: 80px;
-                            color: #2e7d32;
-                            font-weight: bold;
-                        }
-                    """)
-                elif state.name == "BREAK":
-                    self.session_info_label.setText("☕ Break Time")
-                    self.is_break_mode = True
-                    # Orange background for break
-                    self.timer_display.setStyleSheet("""
-                        QLabel {
-                            background-color: #fff3e0;
-                            border: 2px solid #ff9800;
-                            border-radius: 8px;
-                            padding: 8px 16px;
-                            min-width: 80px;
-                            color: #ef6c00;
-                            font-weight: bold;
-                        }
-                    """)
-                elif state.name == "PAUSED":
-                    self.session_info_label.setText("⏸️ Session Paused")
-            else:
-                # No active timer
-                self.timer_display.setText("00:00")
-                self.session_info_label.setText("📚 Ready to Focus & Take Notes")
-                # Reset to default style
-                self.timer_display.setStyleSheet("""
-                    QLabel {
-                        background-color: #f0f0f0;
-                        border: 2px solid #ccc;
-                        border-radius: 8px;
-                        padding: 8px 16px;
-                        min-width: 80px;
-                        font-weight: bold;
-                    }
-                """)
-                
-        except Exception as e:
-            # Only log errors occasionally to avoid spam
-            if not hasattr(self, '_last_timer_error'):
-                print(f"⚠️ Timer error: {e}")
-                self._last_timer_error = str(e)
-    def _update_timer_controls(self, timer_running: bool):
-        """Update timer control button states"""
-        self.start_timer_btn.setEnabled(not timer_running)
-        self.pause_timer_btn.setEnabled(timer_running)
-        self.stop_timer_btn.setEnabled(timer_running)
+        # Set in topic selector
+        for i in range(self.current_topic_combo.count()):
+            if self.current_topic_combo.itemData(i) == topic_id:
+                self.current_topic_combo.setCurrentIndex(i)
+                break
         
-        if not timer_running:
-            self.pause_timer_btn.setText("⏸️ Pause")
+        # Show topic details
+        topic = self.topic_manager.get_topic_by_id(topic_id)
+        if topic:
+            self.session_status.setText(f"📚 Topic: {topic.name}")
     
-    # SIGNAL HANDLERS - ENHANCED
-    
-    def on_timer_started(self, mode):
-        """Handle timer started signal - ENHANCED"""
-        print(f"📢 Timer started signal received: {mode}")
-        self.timer_active = True
-        self._update_timer_controls(True)
+    def focus_on_topic(self, topic_id: int):
+        """Start focus session for specific topic"""
+        # Select the topic
+        self.on_topic_selected(topic_id)
         
-        try:
-            self.notification_manager.send_notification(
-                f"🎯 {mode.title()} Started",
-                "Focus session has begun. Happy reading!"
+        # Start focus session
+        self.start_focus_session()
+    
+    def focus_on_current_topic(self):
+        """Focus on currently selected topic"""
+        current_topic_id = self.current_topic_combo.currentData()
+        if current_topic_id:
+            self.focus_on_topic(current_topic_id)
+        else:
+            QMessageBox.information(
+                self, 
+                "No Topic Selected", 
+                "Please select a topic first to start a focused session."
             )
-        except Exception as e:
-            print(f"❌ Error sending notification: {e}")
     
-    def on_timer_finished(self, mode):
-        """Handle timer finished signal - ENHANCED"""
-        print(f"📢 Timer finished signal received: {mode}")
-        
-        if not self.is_break_mode:
-            # Work session finished
-            self.timer_active = False
-            self._update_timer_controls(False)
+    def create_quick_goal(self):
+        """Create a quick goal dialog"""
+        dialog = CreateGoalDialog(self.topic_manager, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            goal_data = dialog.get_goal_data()
+            goal_id = self.goal_manager.create_goal(
+                goal_type=goal_data['goal_type'],
+                target_value=goal_data['target_value'],
+                target_date=goal_data['target_date'],
+                topic_id=goal_data['topic_id'],
+                document_id=goal_data['document_id']
+            )
             
+            if goal_id:
+                QMessageBox.information(
+                    self,
+                    "Goal Created",
+                    f"Successfully created {goal_data['goal_type'].value} goal!"
+                )
+    
+    def show_topic_progress(self):
+        """Show detailed topic progress"""
+        current_topic_id = self.current_topic_combo.currentData()
+        if not current_topic_id:
             QMessageBox.information(
                 self,
-                f"🎉 {mode.title()} Complete!",
-                f"Excellent work! Your {mode} session is finished.\n\nTake a moment to reflect on what you've read."
+                "No Topic Selected",
+                "Please select a topic to view progress."
             )
+            return
         
-    def on_timer_paused(self):
-        """Handle timer paused signal"""
-        print("📢 Timer paused signal received")
-        self.pause_timer_btn.setText("▶️ Resume")
+        topic_summary = self.topic_manager.get_topic_summary(current_topic_id)
+        if topic_summary:
+            progress_text = self.topic_manager.export_topic_summary(current_topic_id)
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Progress: {topic_summary.name}")
+            dialog.resize(600, 500)
+            
+            layout = QVBoxLayout(dialog)
+            
+            text_display = QTextEdit()
+            text_display.setPlainText(progress_text)
+            text_display.setReadOnly(True)
+            layout.addWidget(text_display)
+            
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.accept)
+            layout.addWidget(close_btn)
+            
+            dialog.exec()
     
-    def on_timer_resumed(self):
-        """Handle timer resumed signal"""
-        print("📢 Timer resumed signal received")
-        self.pause_timer_btn.setText("⏸️ Pause")
-    
-    def on_timer_stopped(self):
-        """Handle timer stopped signal"""
-        print("📢 Timer stopped signal received")
-        self.timer_active = False
-        self.is_break_mode = False
-        self._update_timer_controls(False)
-    
-    def on_break_started(self, duration):
-        """Handle break started signal - ENHANCED"""
-        print(f"📢 Break started signal received: {duration} seconds")
-        self.is_break_mode = True
-        minutes = duration // 60
+    def show_goals_progress(self):
+        """Show goals progress overview"""
+        weekly_overview = self.goal_manager.get_weekly_goals_overview()
         
-        try:
-            self.notification_manager.send_notification(
-                "☕ Break Time!",
-                f"Take a {minutes}-minute break. You've earned it!"
+        progress_text = f"""
+# 🎯 Goals Progress Overview
+
+## 📊 This Week's Summary
+- **Goals Completed:** {weekly_overview['goals_completed_this_week']}
+- **Goals On Track:** {weekly_overview['goals_on_track']}
+- **Goals Behind:** {weekly_overview['goals_behind']}
+
+## ⏱️ Time Goals
+- **Target:** {weekly_overview['total_time_target']:.0f} minutes
+- **Achieved:** {weekly_overview['total_time_achieved']:.0f} minutes
+- **Progress:** {(weekly_overview['total_time_achieved']/weekly_overview['total_time_target']*100) if weekly_overview['total_time_target'] > 0 else 0:.1f}%
+
+## 📄 Page Goals
+- **Target:** {weekly_overview['total_pages_target']:.0f} pages
+- **Achieved:** {weekly_overview['total_pages_achieved']:.0f} pages
+- **Progress:** {(weekly_overview['total_pages_achieved']/weekly_overview['total_pages_target']*100) if weekly_overview['total_pages_target'] > 0 else 0:.1f}%
+        """
+        
+        if weekly_overview['most_progress_goal']:
+            goal = weekly_overview['most_progress_goal']
+            progress_text += f"\n## 🏆 Top Performer\n**{goal.goal_type.value.title()} Goal:** {goal.progress.progress_percentage:.1f}% complete"
+        
+        QMessageBox.information(self, "Goals Progress", progress_text)
+    
+    def export_current_topic(self):
+        """Export current topic summary"""
+        current_topic_id = self.current_topic_combo.currentData()
+        if not current_topic_id:
+            QMessageBox.information(
+                self,
+                "No Topic Selected",
+                "Please select a topic to export."
             )
-        except Exception as e:
-            print(f"❌ Error sending break notification: {e}")
-    
-    def on_break_finished(self):
-        """Handle break finished signal - ENHANCED"""
-        print("📢 Break finished signal received")
+            return
         
-        self.timer_active = False
-        self.is_break_mode = False
-        self._update_timer_controls(False)
+        from PyQt6.QtWidgets import QFileDialog
         
-        try:
-            self.notification_manager.send_notification(
-                "⏰ Break Over",
-                "Ready for another focused session?"
-            )
-        except Exception as e:
-            print(f"❌ Error sending break end notification: {e}")
-    
-    def on_time_updated(self, remaining_seconds):
-        """Handle time update signal - NEW"""
-        print(f"🕐 Time updated: {remaining_seconds}s remaining")
-        # This will be handled by update_timer_display() automatically
-    
-    # Focus Mode Methods
-    def toggle_focus_mode(self):
-        """Toggle focus mode on/off"""
-        print("🎯 Toggling focus mode")
+        topic = self.topic_manager.get_topic_by_id(current_topic_id)
+        if not topic:
+            return
         
-        try:
-            self.focus_manager.toggle_focus_mode(self)
-            is_focus = self.focus_manager.is_enabled()
-            self.focus_mode_btn.setChecked(is_focus)
-            self.focus_mode_btn.setText("🔍 Exit Focus" if is_focus else "🎯 Focus Mode")
-            print(f"✅ Focus mode: {'ON' if is_focus else 'OFF'}")
-        except Exception as e:
-            print(f"❌ Error toggling focus mode: {e}")
-    
-    # Analytics Methods
-    def show_daily_stats(self):
-        """Show daily reading statistics"""
-        try:
-            stats = self.analytics_manager.get_daily_stats()
-            
-            message = f"""
-📊 Daily Reading Statistics
-
-📖 Total Reading Time: {stats.get('total_reading_time', 0)} minutes
-📄 Pages Read: {stats.get('total_pages_read', 0)}
-🔄 Sessions: {stats.get('session_count', 0)}
-⚡ Average Speed: {stats.get('average_reading_speed', 0):.1f} pages/min
-⏱️ Longest Session: {stats.get('longest_session', 0)} minutes
-
-Timer Mode Breakdown:
-{self._format_session_types(stats.get('session_types', {}))}
-            """.strip()
-            
-            QMessageBox.information(self, "Daily Statistics", message)
-        except Exception as e:
-            print(f"❌ Error showing daily stats: {e}")
-            QMessageBox.warning(self, "Analytics Error", "Unable to load daily statistics.")
-    
-    def show_time_estimates(self):
-        """Show time estimation for current document"""
-        try:
-            if not hasattr(self.pdf_viewer, 'pdf_handler') or not self.pdf_viewer.pdf_handler.document_id:
-                QMessageBox.information(self, "Time Estimates", "Please open a PDF document first.")
-                return
-            
-            estimate = self.time_estimator.estimate_document_completion(
-                self.pdf_viewer.pdf_handler.document_id
-            )
-            
-            if not estimate:
-                QMessageBox.warning(self, "Time Estimates", "Unable to calculate estimates.")
-                return
-            
-            message = f"""
-📊 Smart Time Estimation
-
-📖 Document: {estimate.get("document_title", "Unknown")}
-📄 Progress: {estimate.get("current_page", 0)} / {estimate.get("total_pages", 0)} pages ({estimate.get("progress_percent", 0)}%)
-
-⏱️ Time Estimates:
-• Remaining pages: {estimate.get("remaining_pages", 0)}
-• Time per page: {estimate.get("avg_time_per_page_seconds", 0):.1f} seconds
-• Estimated time to finish: {estimate.get("estimated_time_remaining_formatted", "Unknown")}
-
-📅 Completion Forecast:
-• At your current pace: {estimate.get("estimated_completion_date", "Unknown")[:10] if estimate.get("estimated_completion_date") else "Unknown"}
-• Confidence level: {estimate.get("confidence_level", "Unknown")}
-
-💡 Recommendation:
-{estimate.get("recommendation", "Keep reading!")}
-            """.strip()
-            
-            QMessageBox.information(self, "📊 Time Estimates", message)
-        except Exception as e:
-            print(f"❌ Error showing time estimates: {e}")
-            QMessageBox.warning(self, "Analytics Error", "Unable to load time estimates.")
-    
-    def _format_session_types(self, session_types):
-        """Format session types for display"""
-        if not session_types:
-            return "No sessions yet"
-        
-        formatted = []
-        for session_type, count in session_types.items():
-            formatted.append(f"  {session_type.title()}: {count}")
-        
-        return "\n".join(formatted)
-    
-    # Note Methods
-    def search_notes(self):
-        """Open note search dialog"""
-        try:
-            from PyQt6.QtWidgets import QInputDialog
-            
-            query, ok = QInputDialog.getText(self, 'Search Notes', 'Enter search terms:')
-            
-            if ok and query.strip():
-                results = self.note_manager.search_notes(query.strip())
-                
-                if results:
-                    result_text = f"Found {len(results)} notes:\n\n"
-                    for note in results[:10]:
-                        topic_name = self.note_manager.topics.get(note.topic_id, type('', (), {'name': 'Unknown'})).name
-                        result_text += f"📝 {note.title}\n"
-                        result_text += f"   🗂️ {topic_name} • Page {note.page_number}\n"
-                        if note.excerpt:
-                            excerpt = note.excerpt[:100] + "..." if len(note.excerpt) > 100 else note.excerpt
-                            result_text += f"   📄 \"{excerpt}\"\n"
-                        result_text += "\n"
-                    
-                    if len(results) > 10:
-                        result_text += f"... and {len(results) - 10} more results"
-                    
-                    QMessageBox.information(self, "Search Results", result_text)
-                else:
-                    QMessageBox.information(self, "Search Results", f"No notes found for: {query}")
-        except Exception as e:
-            print(f"❌ Error searching notes: {e}")
-            QMessageBox.warning(self, "Search Error", "Unable to search notes.")
-    
-    def export_current_notes(self):
-        """Export notes for current document"""
-        try:
-            if hasattr(self.pdf_viewer, 'export_notes'):
-                self.pdf_viewer.export_notes()
-            else:
-                QMessageBox.information(self, "Export Notes", "Note export feature not available yet.")
-        except Exception as e:
-            print(f"❌ Error exporting notes: {e}")
-            QMessageBox.warning(self, "Export Error", "Unable to export notes.")
-    
-    def on_note_created(self, note_id: str):
-        """Handle note creation from PDF viewer"""
-        print(f"📢 Note created: {note_id}")
-        try:
-            note = self.note_manager.notes.get(note_id)
-            if note:
-                self.notification_manager.send_notification(
-                    "📝 Note Created",
-                    f"Added note: {note.title}"
-                )
-        except Exception as e:
-            print(f"❌ Error handling note creation: {e}")
-    
-    def on_note_manager_note_created(self, note_id: str):
-        """Handle note creation from note manager"""
-        print(f"📢 Note manager created note: {note_id}")
-    
-    def on_document_opened(self, filepath: str):
-        """Handle document opened event"""
-        filename = os.path.basename(filepath)
-        self.status_bar.showMessage(f"Opened: {filename}")
-        self.setWindowTitle(f"SprintReader - {filename}")
-        print(f"📖 Document opened: {filename}")
-    
-    def on_page_changed(self, page_num: int):
-        """Handle page change event"""
-        try:
-            if hasattr(self.pdf_viewer, 'pdf_handler') and self.pdf_viewer.pdf_handler.total_pages > 0:
-                progress = (page_num / self.pdf_viewer.pdf_handler.total_pages) * 100
-                self.status_bar.showMessage(
-                    f"Page {page_num} of {self.pdf_viewer.pdf_handler.total_pages} ({progress:.1f}%)"
-                )
-        except Exception as e:
-            print(f"❌ Error updating page info: {e}")
-    
-    def on_focus_enabled(self):
-        """Handle focus mode enabled"""
-        print("📢 Focus mode enabled")
-        self.status_bar.showMessage("🎯 Focus Mode Active")
-    
-    def on_focus_disabled(self):
-        """Handle focus mode disabled"""
-        print("📢 Focus mode disabled")
-        self.status_bar.showMessage("🔍 Focus Mode Disabled")
-    
-    def show_about(self):
-        """Show about dialog"""
-        QMessageBox.about(
+        file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "About SprintReader",
-            """
-            <h3>SprintReader v4.0</h3>
-            <p><b>PDF Reading & Note-Taking Tool</b></p>
-            
-            <p><b>Features:</b></p>
-            <ul>
-            <li>📝 Note-Taking System</li>
-            <li>🍅 Pomodoro Timer</li>
-            <li>⚡ Sprint Sessions</li>
-            <li>🎯 Focus Mode</li>
-            <li>📊 Reading Analytics</li>
-            <li>⏱️ Time Estimation</li>
-            <li>💾 Local Data Storage</li>
-            </ul>
-            
-            <p><b>Keyboard Shortcuts:</b></p>
-            <ul>
-            <li>Ctrl+O: Open PDF</li>
-            <li>Ctrl+P: Start Pomodoro</li>
-            <li>Ctrl+Shift+S: Start Sprint</li>
-            <li>F11: Toggle Focus Mode</li>
-            <li>←/→: Previous/Next Page</li>
-            </ul>
-            """
+            "Export Topic Summary",
+            f"{topic.name}_summary.txt",
+            "Text Files (*.txt);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                summary_text = self.topic_manager.export_topic_summary(current_topic_id)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(summary_text)
+                
+                QMessageBox.information(
+                    self,
+                    "Export Complete",
+                    f"Topic summary exported to:\n{file_path}"
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Export Error",
+                    f"Failed to export topic summary:\n{str(e)}"
+                )
+    
+    def on_focus_session_started(self, session_id: int, focus_level: str):
+        """Handle focus session start"""
+        self.notification_manager.send_notification(
+            f"🎯 Focus Session Started",
+            f"Entering {focus_level} focus mode. Happy reading!"
+        )
+    
+    def on_focus_session_ended(self, session_id: int, session_data: dict):
+        """Handle focus session end"""
+        duration = session_data.get('duration', 0)
+        productivity = session_data.get('productivity_score', 0)
+        
+        self.notification_manager.send_notification(
+            "📊 Focus Session Complete",
+            f"Completed {duration:.0f}min session with {productivity:.0f}% productivity!"
+        )
+    
+    def on_productivity_alert(self, alert_type: str, message: str):
+        """Handle productivity alerts"""
+        if alert_type == "distraction":
+            QMessageBox.warning(self, "Focus Alert", message)
+        else:
+            self.notification_manager.send_notification("⚡ Productivity Alert", message)
+    
+    def on_goal_completed(self, goal_id: int, description: str):
+        """Handle goal completion"""
+        self.notification_manager.send_notification(
+            "🎉 Goal Completed!",
+            f"Congratulations! {description}"
+        )
+        
+        # Update related goals progress for same topic
+        goal = self.goal_manager.get_goal_by_id(goal_id)
+        if goal and goal.topic_id:
+            # Refresh topic display
+            self.topic_overview.refresh_topics()
+    
+    def on_goal_at_risk(self, goal_id: int, warning_message: str):
+        """Handle goal at risk warning"""
+        self.notification_manager.send_notification(
+            "⚠️ Goal At Risk",
+            warning_message
         )
     
     def closeEvent(self, event):
-        """Handle application close event"""
-        print("👋 SprintReader closing...")
+        """Handle application close"""
+        # End any active focus session
+        if self.focus_session_active:
+            self.end_focus_session()
         
-        # Stop any active timers
-        if self.timer_active:
-            try:
-                self.timer_manager.stop()
-                print("⏹️ Timer stopped on close")
-            except Exception as e:
-                print(f"❌ Error stopping timer on close: {e}")
-        
-        # Close managers
+        # Save any pending data
         try:
-            self.analytics_manager.close()
-            self.time_estimator.close()
-            self.reading_predictor.close()
+            # Close database connections
+            if hasattr(self, 'analytics_manager'):
+                self.analytics_manager.close()
         except Exception as e:
-            print(f"❌ Error closing managers: {e}")
+            print(f"❌ Error during cleanup: {e}")
         
         event.accept()
 
 def main():
-    """Main application entry point"""
-    print("🚀 Starting SprintReader...")
+    """Main application entry point for Stage 5"""
+    print("🚀 Starting SprintReader Stage 5...")
     
     try:
         # Create QApplication
         app = QApplication(sys.argv)
-        app.setApplicationName("SprintReader")
-        app.setApplicationVersion("4.0.0")
+        app.setApplicationName("SprintReader Stage 5")
+        app.setApplicationVersion("5.0.0")
         app.setOrganizationName("SprintReader")
         app.setStyle('Fusion')
         
         # Create main window
-        window = SprintReaderMainWindow()
+        window = Stage5MainWindow()
         window.show()
         
-        print("✅ SprintReader launched successfully!")
-        print("📝 Features: Timer modes, Focus mode, Note-taking, Analytics")
-        print("📖 Use Ctrl+O to open a PDF file")
-        print("🍅 Use Ctrl+P for Pomodoro timer")
-        print("⚡ Use Ctrl+Shift+S for Sprint timer")
-        print("🎯 Use F11 for Focus mode")
-        print("⏱️ Timer should now work properly!")
+        print("✅ SprintReader Stage 5 launched successfully!")
+        print("📚 New Features:")
+        print("  • Topic-based PDF organization")
+        print("  • Adaptive goal setting with progress tracking")
+        print("  • Enhanced focus mode with productivity analytics")
+        print("  • Smart time estimation and recommendations")
+        print("  • Multi-level focus modes (Minimal → Immersive)")
+        print("🎯 Use F11 to start focus sessions")
+        print("📊 Check Focus Analytics tab for productivity insights")
         
         # Run the application
         sys.exit(app.exec())
         
     except Exception as e:
-        print(f"❌ Error starting SprintReader: {e}")
+        print(f"❌ Error starting SprintReader Stage 5: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
